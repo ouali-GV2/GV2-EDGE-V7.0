@@ -1,0 +1,22 @@
+version: "3.9"
+
+services:
+  gv2-edge:
+    build: .
+    container_name: gv2-edge
+    restart: unless-stopped
+
+    ports:
+      - "8501:8501"
+
+    volumes:
+      - ./data:/app/data
+
+    environment:
+      - TZ=UTC
+
+    # Limite légère (optionnel mais safe sur CX33)
+    deploy:
+      resources:
+        limits:
+          memory: 6g

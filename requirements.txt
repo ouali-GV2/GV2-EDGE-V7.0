@@ -1,0 +1,50 @@
+# Utils
+python-dateutil
+pytz
+
+# Core
+pandas
+numpy
+requests
+python-dateutil
+pytz
+
+# Market data
+yfinance
+finnhub-python
+
+# NLP / IA
+openai
+
+# Visualization / dashboard
+streamlit
+plotly
+matplotlib
+
+# Backtesting & stats
+scipy
+scikit-learn
+
+# Utils
+tqdm
+loguru
+
+# Telegram
+python-telegram-bot
+
+# Caching & performance
+diskcache
+
+# IBKR API (read-only)
+ib-insync
+
+# Parsing / feeds
+beautifulsoup4
+feedparser
+lxml  # HTML/XML parsing for FDA calendar
+
+# Google Trends (social buzz)
+pytrends
+
+# System monitoring
+psutil

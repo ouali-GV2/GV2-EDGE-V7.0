@@ -1,0 +1,52 @@
+# ============================
+# GV2-EDGE REQUIREMENTS
+# ============================
+
+# Date & Time
+python-dateutil
+pytz
+
+# Core Data Processing
+pandas
+numpy
+
+# HTTP Requests
+requests
+
+# Market Data APIs
+yfinance
+finnhub-python
+
+# NLP / AI
+openai
+
+# Visualization & Dashboard
+streamlit
+plotly
+matplotlib
+
+# Backtesting & Statistics
+scipy
+scikit-learn
+
+# CLI & Progress
+tqdm
+
+# Logging
+loguru
+
+# Telegram Bot
+python-telegram-bot
+
+# Caching & Performance
+diskcache
+
+# IBKR API (Interactive Brokers)
+ib-insync
+
+# Web Scraping & Feeds
+beautifulsoup4
+feedparser
+
+# System Monitoring
+psutil
