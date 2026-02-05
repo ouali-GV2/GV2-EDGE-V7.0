@@ -214,28 +214,56 @@ get_extended_hours_boost(ticker)  # Pour Monster Score
 
 ## 🔧 Configuration
 
-### config.py - Variables Clés
+### Environment Variables (.env)
+
+**IMPORTANT:** API keys are now loaded from environment variables for security.
+
+```bash
+# Create .env file from template
+cp .env.example .env
+
+# Required variables
+GROK_API_KEY=xai-...           # x.ai API (NLP + Twitter/X)
+FINNHUB_API_KEY=...            # Market data fallback
+TELEGRAM_BOT_TOKEN=...         # Alerts
+TELEGRAM_CHAT_ID=...           # Alerts
+
+# IBKR (recommended)
+IBKR_HOST=127.0.0.1
+IBKR_PORT=7497                 # 7497=paper, 7496=live
+
+# Social Buzz APIs (optional but recommended)
+REDDIT_CLIENT_ID=...           # Reddit PRAW
+REDDIT_CLIENT_SECRET=...
+STOCKTWITS_ACCESS_TOKEN=...    # StockTwits
+```
+
+### config.py - Key Settings
 
 ```python
-# APIs
-GROK_API_KEY = "xai-..."
-FINNHUB_API_KEY = "..."
-TELEGRAM_BOT_TOKEN = "..."
-
-# IBKR
-USE_IBKR_DATA = True
-IBKR_HOST = "127.0.0.1"
-IBKR_PORT = 7497  # 7497=paper, 7496=live
-
-# Seuils signaux
+# Signal thresholds
 BUY_THRESHOLD = 0.65
 BUY_STRONG_THRESHOLD = 0.80
 
-# Universe
+# Universe filters
 MAX_MARKET_CAP = 2_000_000_000  # $2B
 MIN_PRICE = 1.0
-MAX_PRICE = 50.0
+MAX_PRICE = 20.0
+
+# Social Buzz (V5.3)
+ENABLE_SOCIAL_BUZZ = True
+ENABLE_GOOGLE_TRENDS = False   # Disabled (pytrends unreliable)
+SOCIAL_BUZZ_SOURCES = ["twitter", "reddit", "stocktwits"]
 ```
+
+### Social Buzz Sources (V5.3)
+
+| Source | Weight | API | Notes |
+|--------|--------|-----|-------|
+| Twitter/X | 45% | `GROK_API_KEY` | Real-time, institutional leaks |
+| Reddit | 30% | `REDDIT_*` | PRAW authenticated (WSB, stocks, pennystocks) |
+| StockTwits | 25% | `STOCKTWITS_*` | Dedicated traders, sentiment labels |
+| Google Trends | 0% | N/A | **Disabled** (pytrends rate limited) |
 
 ---
 
@@ -324,5 +352,5 @@ Output (Telegram + SQLite + Dashboard)
 
 ---
 
-**Version:** 5.3.0
-**Last Updated:** 2026-02-04
+**Version:** 5.3.1
+**Last Updated:** 2026-02-05

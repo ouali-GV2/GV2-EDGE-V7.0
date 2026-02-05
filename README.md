@@ -473,11 +473,12 @@ Friday 22:00 UTC → Weekly deep audit
 
 **Fonction :** Mesure volume mentions et détecte les spikes
 
-**Sources actives :**
-- Twitter/X (via Grok API) - 35% du score buzz
-- Reddit WallStreetBets - 25% du score buzz
-- StockTwits - 20% du score buzz
-- Google Trends - 20% du score buzz
+**Sources actives (Google Trends désactivé) :**
+- Twitter/X (via Grok API) - 45% du score buzz
+- Reddit (PRAW authentifié) - 30% du score buzz
+- StockTwits (API authentifiée) - 25% du score buzz
+
+**Note V5.3 :** Google Trends désactivé par défaut (pytrends instable due au rate limiting). Peut être réactivé via `ENABLE_GOOGLE_TRENDS=True` dans config.py.
 
 **Scoring :** Score combiné 0-1, spike détecté si buzz > 3x baseline
 

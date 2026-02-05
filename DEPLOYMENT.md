@@ -87,52 +87,97 @@ python -c "import ib_insync; import streamlit; import pandas; print('All depende
 
 ## 3. API Configuration
 
-### 3.1 Create Local Config (Recommended)
+### 3.1 Create Environment File (Required)
 
-Create a `config_local.py` file (gitignored) to override default settings:
+Create a `.env` file from the template:
 
 ```bash
-cp config.py config_local.py
+cp .env.example .env
+chmod 600 .env  # Restrict permissions
 ```
 
 ### 3.2 Configure API Keys
 
-Edit `config.py` (or `config_local.py`):
+Edit `.env` with your API keys:
 
-```python
-# ========= API KEYS =========
+```bash
+# ========= REQUIRED =========
 
-# Grok API (x.ai) - Required for NLP
-GROK_API_KEY = "xai-your-api-key-here"
+# Grok API (x.ai) - Required for NLP & Twitter/X access
+GROK_API_KEY=xai-your-api-key-here
 
-# Finnhub - Required for fallback data
-FINNHUB_API_KEY = "your-finnhub-key"
+# Finnhub - Required for fallback data & earnings calendar
+FINNHUB_API_KEY=your-finnhub-key
 
 # Telegram Bot - Required for alerts
-TELEGRAM_BOT_TOKEN = "123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
-TELEGRAM_CHAT_ID = "-100123456789"
+TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz
+TELEGRAM_CHAT_ID=-100123456789
+
+# ========= IBKR (Recommended) =========
+
+IBKR_HOST=127.0.0.1
+IBKR_PORT=4002  # 4002=paper, 4001=live
+
+# ========= SOCIAL BUZZ (Optional but Recommended) =========
+
+# Reddit API - Get at https://www.reddit.com/prefs/apps
+REDDIT_CLIENT_ID=your-reddit-client-id
+REDDIT_CLIENT_SECRET=your-reddit-client-secret
+REDDIT_USER_AGENT=GV2-EDGE/1.0
+
+# StockTwits API - Get at https://api.stocktwits.com/developers
+STOCKTWITS_ACCESS_TOKEN=your-stocktwits-token
 ```
+
+**IMPORTANT:** Never commit `.env` to git (already in `.gitignore`)
 
 ### 3.3 Get API Keys
 
-#### Grok API (x.ai)
+#### Grok API (x.ai) - REQUIRED
 1. Visit https://x.ai/api
 2. Sign up and create an API key
-3. Copy key to `GROK_API_KEY`
+3. Add to `.env` as `GROK_API_KEY`
+4. **Note:** This also provides Twitter/X data access
 
-#### Finnhub
+#### Finnhub - REQUIRED
 1. Visit https://finnhub.io/
 2. Sign up for free account
 3. Copy API key from dashboard
+4. Add to `.env` as `FINNHUB_API_KEY`
 
-#### Telegram Bot
+#### Telegram Bot - REQUIRED
 1. Message @BotFather on Telegram
 2. Send `/newbot` and follow prompts
-3. Copy the bot token
+3. Copy the bot token to `TELEGRAM_BOT_TOKEN`
 4. Create a group/channel and add the bot
 5. Get chat ID via `https://api.telegram.org/bot<TOKEN>/getUpdates`
+6. Add chat ID to `TELEGRAM_CHAT_ID`
 
-### 3.4 Test API Connections
+#### Reddit API - OPTIONAL
+1. Visit https://www.reddit.com/prefs/apps
+2. Click "Create App" → Select "script"
+3. Fill in name and redirect URI (http://localhost:8080)
+4. Copy `client_id` (under app name) and `client_secret`
+5. Add to `.env` as `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET`
+
+#### StockTwits API - OPTIONAL
+1. Visit https://api.stocktwits.com/developers
+2. Create developer account
+3. Create an application
+4. Copy access token to `STOCKTWITS_ACCESS_TOKEN`
+
+### 3.4 Social Buzz Sources & Weights
+
+| Source | Weight | API Required |
+|--------|--------|--------------|
+| Twitter/X | 45% | `GROK_API_KEY` |
+| Reddit | 30% | `REDDIT_CLIENT_ID` + `SECRET` |
+| StockTwits | 25% | `STOCKTWITS_ACCESS_TOKEN` |
+| Google Trends | 0% | Disabled (unreliable) |
+
+**Note:** If Reddit/StockTwits APIs are not configured, the system falls back to public endpoints with reduced reliability.
+
+### 3.5 Test API Connections
 
 ```bash
 # Test Finnhub
@@ -153,6 +198,9 @@ r = requests.post(
 )
 print('Telegram:', 'OK' if r.status_code == 200 else 'FAILED')
 "
+
+# Test Social Buzz (all sources)
+python src/social_buzz.py
 ```
 
 ---
@@ -666,4 +714,4 @@ If hitting rate limits:
 
 ---
 
-*Last updated: 2024 - GV2-EDGE V5.1*
+*Last updated: 2026-02 - GV2-EDGE V5.3*

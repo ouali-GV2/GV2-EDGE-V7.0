@@ -259,7 +259,15 @@ Le score inclut maintenant **8 facteurs** pondérés :
 | 0.5-0.7 | Buzz élevé | Attention retail |
 | 0.7-1.0 | Viral/Trending | Prudence (late?) |
 
-**Sources** : Twitter (35%), Reddit WSB (25%), StockTwits (20%), Google Trends (20%)
+**Sources (V5.3)** :
+| Source | Poids | Notes |
+|--------|-------|-------|
+| Twitter/X | 45% | Via Grok API - Real-time |
+| Reddit | 30% | PRAW API - WSB, stocks, pennystocks |
+| StockTwits | 25% | API - Sentiment labels (Bullish/Bearish) |
+| Google Trends | 0% | **Désactivé** (pytrends instable) |
+
+**Sentiment Boost** : +15% si Reddit ou StockTwits montrent un sentiment fortement bullish (ratio > 2.0)
 
 ---
 
@@ -272,5 +280,5 @@ Le score inclut maintenant **8 facteurs** pondérés :
 
 ---
 
-**Version:** 5.3.0
-**Last Updated:** 2026-02-04
+**Version:** 5.3.1
+**Last Updated:** 2026-02-05

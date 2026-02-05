@@ -6,7 +6,7 @@
 
 ```bash
 unzip GV2-EDGE-V5.1-COMPLETE.zip
-cd GV2-EDGE-V2-ENHANCED
+cd GV2-EDGE-V5.1
 ```
 
 ### 2. Environnement Python
@@ -17,25 +17,32 @@ source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 3. Configuration APIs
+### 3. Configuration APIs (Variables d'environnement)
 
-Éditer `config.py` :
+Créer un fichier `.env` à la racine :
 
-```python
-# Grok API (X.AI) - OBLIGATOIRE
-GROK_API_KEY = "xai-YOUR_KEY_HERE"
+```bash
+cp .env.example .env
+nano .env  # ou votre éditeur préféré
+```
 
-# Finnhub - OBLIGATOIRE (gratuit)
-FINNHUB_API_KEY = "YOUR_FINNHUB_KEY"
+Remplir les valeurs :
 
-# Telegram - OBLIGATOIRE
-TELEGRAM_BOT_TOKEN = "YOUR_BOT_TOKEN"
-TELEGRAM_CHAT_ID = "YOUR_CHAT_ID"
+```bash
+# ========= OBLIGATOIRE =========
+GROK_API_KEY=xai-YOUR_KEY_HERE
+FINNHUB_API_KEY=YOUR_FINNHUB_KEY
+TELEGRAM_BOT_TOKEN=YOUR_BOT_TOKEN
+TELEGRAM_CHAT_ID=YOUR_CHAT_ID
 
-# IBKR - OPTIONNEL mais recommandé
-USE_IBKR_DATA = True
-IBKR_HOST = "127.0.0.1"
-IBKR_PORT = 7497  # 7497=paper, 7496=live
+# ========= IBKR (recommandé) =========
+IBKR_HOST=127.0.0.1
+IBKR_PORT=7497  # 7497=paper, 7496=live
+
+# ========= SOCIAL BUZZ (optionnel) =========
+REDDIT_CLIENT_ID=YOUR_REDDIT_CLIENT_ID
+REDDIT_CLIENT_SECRET=YOUR_REDDIT_SECRET
+STOCKTWITS_ACCESS_TOKEN=YOUR_STOCKTWITS_TOKEN
 ```
 
 ### 4. IBKR Gateway/TWS (si utilisé)
@@ -61,7 +68,7 @@ python main.py
 # Test connexion IBKR
 python src/ibkr_connector.py
 
-# Test Grok API
+# Test Social Buzz (Twitter, Reddit, StockTwits)
 python src/social_buzz.py
 
 # Test News Flow
@@ -76,7 +83,18 @@ python src/news_flow_screener.py
 2. Récupérer le token
 3. Envoyer un message au bot
 4. Récupérer votre chat_id via `https://api.telegram.org/bot<TOKEN>/getUpdates`
-5. Configurer dans `config.py`
+5. Ajouter dans `.env`
+
+---
+
+## 🌐 APIs Social Buzz
+
+| Source | Poids | Comment obtenir |
+|--------|-------|-----------------|
+| Twitter/X | 45% | Via `GROK_API_KEY` (x.ai) |
+| Reddit | 30% | https://www.reddit.com/prefs/apps |
+| StockTwits | 25% | https://api.stocktwits.com/developers |
+| Google Trends | 0% | Désactivé (instable) |
 
 ---
 
@@ -106,6 +124,7 @@ Attendez les alertes Telegram :
 - `README_DEV.md` : Architecture technique
 - `README_TRADER.md` : Guide trading
 - `IBKR_LEVEL1_GUIDE.md` : Configuration IBKR
+- `DEPLOYMENT.md` : Déploiement serveur
 
 ---
 
@@ -114,6 +133,7 @@ Attendez les alertes Telegram :
 - **Mode READ ONLY** : Le système ne passe JAMAIS d'ordres
 - **Décision humaine** : Vous décidez d'entrer ou non
 - **Risk management** : Toujours utiliser des stops
+- **Sécurité** : Ne jamais commiter le fichier `.env`
 
 ---
 
