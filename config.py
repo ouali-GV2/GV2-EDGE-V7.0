@@ -270,6 +270,28 @@ VOLUME_ADJUST_FRIDAY = 0.9            # Volume factor for Fridays
 VOLUME_ADJUST_PRE_HOLIDAY = 0.75      # Volume factor for day before holiday
 
 # ============================
+# CATALYST SCORE V3 (V6)
+# ============================
+
+ENABLE_CATALYST_V3 = True             # Enable enhanced catalyst scoring
+
+# Temporal decay settings
+CATALYST_DECAY_HALF_LIFE_HOURS = 24   # Hours for score to decay by 50%
+CATALYST_MIN_SCORE_THRESHOLD = 0.1    # Minimum score to consider
+
+# Boost settings
+CATALYST_MAX_BOOST = 1.6              # Maximum boost multiplier for Monster Score
+
+# Alert level thresholds
+CATALYST_ALERT_CRITICAL = 0.8         # Score threshold for CRITICAL alert
+CATALYST_ALERT_HIGH = 0.6             # Score threshold for HIGH alert
+CATALYST_ALERT_MEDIUM = 0.4           # Score threshold for MEDIUM alert
+
+# Performance tracking
+CATALYST_TRACK_PERFORMANCE = True     # Track catalyst performance for learning
+CATALYST_PERFORMANCE_LOOKBACK = 90    # Days to look back for performance stats
+
+# ============================
 # PRE-SPIKE RADAR (V6)
 # ============================
 

@@ -33,6 +33,37 @@ Ce document explique :
 - Alert levels: NONE → WATCH → ELEVATED → HIGH
 - Boost anticipatif pour Monster Score (jusqu'à 1.4x)
 
+**4. Catalyst Score V3** (`src/catalyst_score_v3.py`)
+- Pondération par type de catalyst (FDA > Earnings > Contract)
+- Temporal decay: événements frais > événements anciens (half-life 24h)
+- Quality assessment: fiabilité source + confirmation multi-sources
+- Confluence multi-catalyst: plusieurs catalysts = score plus élevé
+- Historical performance tracking: apprentissage des performances passées
+- Alert levels: NONE → LOW → MEDIUM → HIGH → CRITICAL
+- Boost multiplicateur pour Monster Score (jusqu'à 1.6x)
+
+### Hiérarchie des Catalyst Types (V3)
+
+```python
+# Tier 1: Highest Impact (0.9-1.0)
+FDA_APPROVAL, BUYOUT_CONFIRMED, MAJOR_PARTNERSHIP
+
+# Tier 2: High Impact (0.75-0.89)
+FDA_TRIAL_POSITIVE, EARNINGS_BEAT_BIG, MERGER_ANNOUNCEMENT,
+MAJOR_CONTRACT, GUIDANCE_RAISE
+
+# Tier 3: Medium Impact (0.5-0.74)
+ANALYST_UPGRADE, EARNINGS_BEAT, NEW_PRODUCT,
+PATENT_GRANTED, INSIDER_BUYING
+
+# Tier 4: Lower Impact (0.3-0.49)
+CONFERENCE_PRESENTATION, STOCK_BUYBACK,
+DIVIDEND_INCREASE, MANAGEMENT_CHANGE
+
+# Tier 5: Speculative (0.2-0.29)
+BUYOUT_RUMOR, FDA_SPECULATION, SOCIAL_MOMENTUM
+```
+
 ### Monster Score V3 - Nouveau Système de Poids
 
 ```python
@@ -78,6 +109,14 @@ main.py
 │       ├── Options acceleration      # Call momentum increasing
 │       ├── Buzz acceleration         # Social mentions picking up
 │       └── Technical compression     # Squeeze before breakout
+│
+├── 🎯 CATALYST SCORE V3 (NEW V6)
+│   └── src/catalyst_score_v3.py      # Enhanced event-based scoring
+│       ├── Type weighting            # FDA > Earnings > Contract > etc.
+│       ├── Temporal decay            # Fresh events > old events
+│       ├── Quality assessment        # Source reliability + confirmation
+│       ├── Confluence scoring        # Multiple catalysts = higher score
+│       └── Performance tracking      # Learn from historical data
 │
 ├── 🎯 ANTICIPATION ENGINE (V5)
 │   ├── src/anticipation_engine.py      # Orchestrateur principal
