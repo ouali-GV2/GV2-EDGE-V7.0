@@ -1,0 +1,92 @@
+# ============================
+# GV2-EDGE .gitignore
+# ============================
+
+# ========= SECRETS (CRITICAL) =========
+.env
+*.env
+.env.*
+!.env.example
+secrets/
+credentials/
+*.pem
+*.key
+
+# ========= PYTHON =========
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# ========= VIRTUAL ENVIRONMENTS =========
+venv/
+ENV/
+env/
+.venv/
+
+# ========= IDE =========
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+
+# ========= JUPYTER =========
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ========= DATA & CACHE =========
+data/prices_cache/*
+data/features_cache/*
+data/logs/*.log
+!data/prices_cache/.gitkeep
+!data/features_cache/.gitkeep
+!data/logs/.gitkeep
+*.cache
+*.sqlite
+*.db
+
+# ========= OS FILES =========
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ========= LOGS =========
+*.log
+logs/
+log/
+
+# ========= DOCKER =========
+.docker/
+
+# ========= MISC =========
+*.bak
+*.tmp
+*.temp
+.coverage
+htmlcov/
+.tox/
+.pytest_cache/

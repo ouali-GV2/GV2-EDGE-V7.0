@@ -1,3 +1,11 @@
+# ============================
+# GV2-EDGE MAIN ENTRY POINT
+# ============================
+
+# Load environment variables FIRST (before any other imports)
+from dotenv import load_dotenv
+load_dotenv()
+
 import time
 import threading
 import datetime

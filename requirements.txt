@@ -2,6 +2,9 @@
 # GV2-EDGE REQUIREMENTS
 # ============================
 
+# Environment Variables
+python-dotenv
+
 # Date & Time
 python-dateutil
 pytz
@@ -12,6 +15,9 @@ numpy
 
 # HTTP Requests
 requests
+
+# Reddit API
+praw
 
 # Market Data APIs
 yfinance

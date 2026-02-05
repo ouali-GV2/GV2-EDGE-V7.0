@@ -2,19 +2,21 @@
 # GV2-EDGE GLOBAL CONFIG
 # ============================
 
+import os
+
 # ========= API KEYS =========
 
-GROK_API_KEY = "YOUR_GROK_API_KEY"
-FINNHUB_API_KEY = "YOUR_FINNHUB_API_KEY"
+GROK_API_KEY = os.getenv("GROK_API_KEY", "")
+FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "")
 
 # ========= IBKR CONNECTION =========
 
 # Use IBKR for real-time market data (Level 1)
 USE_IBKR_DATA = True  # Set to False to use Finnhub instead
 
-IBKR_HOST = "127.0.0.1"
-IBKR_PORT = 7497   # 7497 = paper trading, 7496 = live, 4001/4002 = Gateway
-IBKR_CLIENT_ID = 1
+IBKR_HOST = os.getenv("IBKR_HOST", "127.0.0.1")
+IBKR_PORT = int(os.getenv("IBKR_PORT", "7497"))   # 7497 = paper trading, 7496 = live, 4001/4002 = Gateway
+IBKR_CLIENT_ID = int(os.getenv("IBKR_CLIENT_ID", "1"))
 
 # Note: Level 1 subscription provides:
 # - Real-time prices (last, bid, ask)
@@ -24,8 +26,20 @@ IBKR_CLIENT_ID = 1
 # This is SUFFICIENT for GV2-EDGE (Level 2 not needed)
 
 # Telegram
-TELEGRAM_BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
-TELEGRAM_CHAT_ID = "YOUR_TELEGRAM_CHAT_ID"
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+
+# ========= REDDIT API =========
+# Get credentials at: https://www.reddit.com/prefs/apps
+
+REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID", "")
+REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET", "")
+REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT", "GV2-EDGE/1.0")
+
+# ========= STOCKTWITS API =========
+# Get API key at: https://api.stocktwits.com/developers
+
+STOCKTWITS_ACCESS_TOKEN = os.getenv("STOCKTWITS_ACCESS_TOKEN", "")
 
 # ============================
 # TRADING CAPITAL
