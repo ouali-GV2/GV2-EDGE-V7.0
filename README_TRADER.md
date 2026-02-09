@@ -1,284 +1,284 @@
-# 📊 GV2-EDGE V5.3 — Trader Guide
+# GV2-EDGE V6.0 - Trader Guide
 
-## 🎯 Objectif
+## Objectif
 
-GV2-EDGE détecte les top gainers small caps US **AVANT** leurs hausses majeures (+50% à +500%).
+GV2-EDGE detecte les top gainers small caps US **AVANT** leurs hausses majeures (+50% a +500%).
 
 **Cible** : Small caps < $2B market cap, hors OTC
 
 ---
 
-## 🆕 Nouveautés V5.3
+## Nouveautes V6.0
 
-### Monster Score - Nouvelles Composantes
+### 5 Couches d'Anticipation
 
-Le score inclut maintenant **8 facteurs** pondérés :
+| Couche | Module | Impact Trading |
+|--------|--------|----------------|
+| 1 | Market Calendar | Evite faux signaux jours feries |
+| 2 | Repeat Gainer | Badge "serial runner" = sizing adapte |
+| 3 | Pre-Spike Radar | Detection acceleration avant spike |
+| 4 | Catalyst Score V3 | Scoring par tier (FDA > Earnings) |
+| 5 | NLP Enrichi | Sentiment + urgence temps reel |
 
-| Composante | Poids | Description |
-|------------|-------|-------------|
-| Event | 25% | Catalysts (earnings, FDA, M&A) |
-| Volume | 17% | Volume spikes vs moyenne |
-| Pattern | 17% | Patterns techniques (consolidation, flags) |
-| PM Transition | 13% | Qualité transition pre-market → RTH |
-| **Options Flow** | **10%** | Activité options (volume, concentration calls) |
-| Momentum | 8% | Momentum prix |
-| **Social Buzz** | **6%** | Mentions Twitter, Reddit, StockTwits |
-| Squeeze | 4% | Bollinger squeeze |
-
-### Impact pour le Trading
-
-- **Options Flow élevé** (>0.5) = Smart money potentiel
-- **Social Buzz spike** (>0.7) = Attention retail croissante
-- Ces facteurs peuvent confirmer ou renforcer un signal
-
----
-
-## 🚦 Signaux (du plus précoce au plus confirmé)
-
-### 👀 WATCH_EARLY (NOUVEAU V5)
-- **Quand** : Catalyst détecté en after-hours/pre-market
-- **Signification** : Potentiel en formation, pas encore confirmé
-- **Action** : Surveiller, préparer entry
-- **Sizing** : Aucun (attendre upgrade)
-
-### 📊 BUY
-- **Quand** : Score 0.65-0.79 + confirmation technique
-- **Signification** : Setup solide, probabilité élevée
-- **Action** : Entry standard
-- **Sizing** : Position normale (2% risk)
-
-### 🚨 BUY_STRONG
-- **Quand** : Score 0.80+ + catalyst fort + confirmation
-- **Signification** : Opportunité majeure
-- **Action** : Entry immédiate
-- **Sizing** : Position max (3% risk)
-
-### ⏸️ HOLD
-- **Signification** : Pas d'opportunité claire
-- **Action** : Ignorer
-
----
-
-## ⏰ Timeline de Détection V5.1
+### EVENT_TYPE Tiers
 
 ```
-16:00-20:00 ET │ AFTER-HOURS
-              │ ├─ News Flow Screener actif
-              │ ├─ Extended Hours gaps détectés
-              │ ├─ Options Flow analysé
-              │ └─ Signaux: WATCH_EARLY
-              │
-04:00-09:30 ET │ PRE-MARKET
-              │ ├─ Confirmation des gaps
-              │ ├─ Volume PM analysé
-              │ ├─ Upgrades: WATCH_EARLY → BUY
-              │ └─ Signaux: BUY, BUY_STRONG
-              │
-09:30-16:00 ET │ RTH (Regular Trading Hours)
-              │ ├─ Monitoring positions
-              │ ├─ Breakout confirmation
-              │ └─ Signaux: BUY_STRONG (tardifs)
+TIER 1 - CRITICAL (impact 0.90-1.00):
+  FDA_APPROVAL, PDUFA_DECISION, BUYOUT_CONFIRMED
+  -> Action: Entry immediate, sizing max
+
+TIER 2 - HIGH (impact 0.75-0.89):
+  FDA_TRIAL_POSITIVE, BREAKTHROUGH_DESIGNATION, FDA_FAST_TRACK,
+  MERGER_ACQUISITION, EARNINGS_BEAT_BIG, MAJOR_CONTRACT
+  -> Action: Entry rapide, sizing standard+
+
+TIER 3 - MODERATE (impact 0.60-0.74):
+  GUIDANCE_RAISE, EARNINGS_BEAT, PARTNERSHIP, PRICE_TARGET_RAISE
+  -> Action: Attendre confirmation PM
+
+TIER 4 - LOW-MOD (impact 0.45-0.59):
+  ANALYST_UPGRADE, SHORT_SQUEEZE_SIGNAL, UNUSUAL_VOLUME_NEWS
+  -> Action: Watchlist seulement
+
+TIER 5 - SPECULATIVE (impact 0.30-0.44):
+  BUYOUT_RUMOR, SOCIAL_MEDIA_SURGE, BREAKING_POSITIVE
+  -> Action: Prudence, rumors non confirmees
 ```
 
 ---
 
-## 📱 Alertes Telegram
+## Signaux V6
 
-### Format WATCH_EARLY
+### WATCH_EARLY
+
+- **Quand**: Catalyst detecte en after-hours/pre-market
+- **Signification**: Potentiel en formation
+- **V6 Features**: Pre-Spike Radar level, NLP sentiment
+- **Action**: Surveiller, preparer entry
+- **Sizing**: Aucun (attendre upgrade)
+
+### BUY
+
+- **Quand**: Score 0.65-0.79 + confirmation technique
+- **Signification**: Setup solide
+- **V6 Features**: Catalyst tier afiche, Repeat badge si applicable
+- **Action**: Entry standard
+- **Sizing**: 2% risk
+
+### BUY_STRONG
+
+- **Quand**: Score 0.80+ + catalyst TIER 1-2
+- **Signification**: Opportunite majeure
+- **V6 Features**: Full V6 intelligence display
+- **Action**: Entry immediate
+- **Sizing**: 3% risk max
+
+---
+
+## Alertes Telegram V6
+
+### Format Signal V6
+
 ```
-👀 WATCH_EARLY: NVDA
+[SIGNAL_EMOJI] GV2-EDGE V6.0 SIGNAL
 
-📊 Score: 0.55
-├─ Catalyst: EARNINGS_BEAT
-├─ Impact: 0.7
-└─ Urgency: MEDIUM
+Ticker: NVDA
+Signal: BUY_STRONG
+Monster Score: 0.85
+Confidence: 0.92
 
-📰 "NVIDIA beats Q4 expectations..."
+--- V6 Intelligence ---
+[EVENT_EMOJI] Event: FDA_APPROVAL
+TIER 1 - CRITICAL (impact: 0.95)
+Catalyst Score V3: 0.88
+NLP Sentiment: VERY_BULLISH
+Pre-Spike Radar: 3/4 signals
+REPEAT GAINER (4 past spikes)
 
-⏰ Session: AFTER-HOURS
-💡 Action: Surveiller PM confirmation
-```
-
-### Format BUY
-```
-📊 BUY: NVDA
-
-📊 Monster Score: 0.72
-├─ Technical: 0.65
-├─ Fundamental: 0.78
-└─ AH Boost: +0.05
-
-📅 Catalyst: EARNINGS_BEAT
-📈 PM Gap: +5.2%
-
-💰 Trade Plan:
-├─ Entry: $152.50
-├─ Stop: $148.20 (-2.8%)
-├─ Target 1: $165 (+8.2%)
-└─ Risk: 2% capital
-
-⏰ Execute: PM OPEN
-```
-
-### Format BUY_STRONG
-```
-🚨 BUY_STRONG: NVDA
-
-📊 Monster Score: 0.85
-├─ Technical: 0.80
-├─ Fundamental: 0.88
-└─ Options Flow: BULLISH
-
-📅 Catalyst: FDA_APPROVAL
-📈 PM Gap: +12.5%
-🔥 Volume: 5x average
-
-💰 Trade Plan:
-├─ Entry: $165.00 (MARKET)
-├─ Stop: $158.00 (-4.2%)
-├─ Target: $200+ (+21%)
-└─ Risk: 3% capital (MAX)
-
-⏰ Execute: IMMEDIATELY
+--- Position ---
+Entry: $152.50
+Stop: $148.20
+Shares: 45
+Risk: $193.50
 ```
 
----
+### Alert Pre-Spike Radar
 
-## 🎯 Stratégie d'Entrée Recommandée
+```
+PRE-SPIKE RADAR ALERT
 
-### Pour WATCH_EARLY
-1. **Ne pas entrer** immédiatement
-2. Mettre le ticker en watchlist
-3. Attendre confirmation PM :
-   - Gap > 3%
-   - Volume PM élevé
-   - Prix tient au-dessus du gap
-4. Si confirmé → entry sur upgrade à BUY
+Ticker: BIOX
+HIGH (3/4 signals)
 
-### Pour BUY
-1. Entry au prix indiqué (limit order)
-2. Stop-loss obligatoire
-3. Sizing : 2% du capital à risque
-4. Target : selon plan
+Active Signals:
+[CHECK] Volume Acceleration
+[CHECK] Bid-Ask Tightening
+[CHECK] Price Compression
+[X] Dark Pool Activity
 
-### Pour BUY_STRONG
-1. Entry immédiate (market order OK)
-2. Stop-loss plus large (volatilité)
-3. Sizing : jusqu'à 3% du capital à risque
-4. Trailing stop recommandé
+Acceleration Score: 0.78
+Monster Score: 0.72
 
----
+ACTION: Monitor closely for entry
+```
 
-## 📊 Catalysts par Impact
+### Alert Repeat Gainer
 
-| Type | Impact Typique | Timing |
-|------|----------------|--------|
-| FDA_APPROVAL | +50% à +200% | Immédiat |
-| MERGER/ACQUISITION | +30% à +100% | 1-3 jours |
-| EARNINGS_BEAT | +20% à +80% | PM/RTH open |
-| GUIDANCE_RAISE | +15% à +50% | PM/RTH open |
-| CONTRACT_WIN | +10% à +40% | Variable |
-| ANALYST_UPGRADE | +5% à +20% | Variable |
+```
+REPEAT GAINER DETECTED
 
----
+Ticker: MARA
+SERIAL RUNNER
 
-## ⚠️ Risk Management
+Historical Spikes: 7
+Avg Spike: +65.2%
+Last Spike: 2026-01-15
+Volatility Score: 0.82
 
-### Règles d'Or
-1. **Stop-loss toujours** : Jamais de position sans stop
-2. **Max 5 positions** : Diversification obligatoire
-3. **Max 3% risk/trade** : Même sur BUY_STRONG
-4. **Cut losses fast** : Si stop touché, sortir sans hésiter
+Current Monster Score: 0.75
 
-### Sizing par Signal
-
-| Signal | Risk Max | Position Typique |
-|--------|----------|------------------|
-| WATCH_EARLY | 0% | Pas de position |
-| BUY | 2% | $2k sur $100k |
-| BUY_STRONG | 3% | $3k sur $100k |
+WARNING: Known for explosive moves - size appropriately
+```
 
 ---
 
-## 📈 Performance Attendue
+## Strategie par Tier
 
-| Métrique | Cible V5.1 |
-|----------|-----------|
-| Hit Rate | 50-65% |
-| Early Catch (>2h avant) | 60-75% |
-| Avg Win | +45-80% |
-| Avg Loss | -8-15% |
-| Win/Loss Ratio | 3:1 |
-| Lead Time | 6-12h |
+### TIER 1 (FDA_APPROVAL, BUYOUT_CONFIRMED)
 
----
+1. **Entry**: Immediate sur alerte
+2. **Sizing**: Max (3% risk)
+3. **Stop**: Large (volatilite FDA)
+4. **Target**: +50% minimum
+5. **Timing**: Market order OK
 
-## 🔔 Sessions Clés
+### TIER 2 (FDA_TRIAL_POSITIVE, EARNINGS_BEAT_BIG)
 
-### After-Hours (16:00-20:00 ET)
-- **Focus** : Détection précoce
-- **Alertes** : WATCH_EARLY
-- **Action** : Préparer watchlist
+1. **Entry**: PM open ou early RTH
+2. **Sizing**: Standard+ (2.5% risk)
+3. **Stop**: ATR-based
+4. **Target**: +30-50%
+5. **Timing**: Limit preferred
 
-### Pre-Market (04:00-09:30 ET)
-- **Focus** : Confirmation + entry
-- **Alertes** : BUY, BUY_STRONG
-- **Action** : Exécuter trades
+### TIER 3 (EARNINGS_BEAT, PARTNERSHIP)
 
-### RTH (09:30-16:00 ET)
-- **Focus** : Gestion positions
-- **Alertes** : BUY_STRONG (rares)
-- **Action** : Trailing stops, targets
+1. **Entry**: Attendre confirmation PM
+2. **Sizing**: Standard (2% risk)
+3. **Stop**: Tight
+4. **Target**: +20-30%
+5. **Timing**: PM confirmation required
 
----
+### TIER 4-5 (ANALYST_UPGRADE, RUMORS)
 
----
-
-## 📊 Interpréter les Composantes V5.3
-
-### Options Flow (10%)
-
-| Score | Signification | Action |
-|-------|---------------|--------|
-| 0.0-0.3 | Activité normale | Neutre |
-| 0.3-0.6 | Activité légèrement élevée | Surveiller |
-| 0.6-0.8 | Activité inhabituelle | Confirme le signal |
-| 0.8-1.0 | Activité très élevée (smart money?) | Renforce confiance |
-
-**Signaux positifs** :
-- `HIGH_CALL_VOLUME` : Volume calls >= 5000
-- `LOW_PC_RATIO` : Put/Call < 0.5 (bullish)
-- `CALL_CONCENTRATION` : 70%+ du volume en calls
-
-### Social Buzz (6%)
-
-| Score | Signification | Action |
-|-------|---------------|--------|
-| 0.0-0.3 | Buzz normal | Neutre |
-| 0.3-0.5 | Buzz croissant | Surveiller |
-| 0.5-0.7 | Buzz élevé | Attention retail |
-| 0.7-1.0 | Viral/Trending | Prudence (late?) |
-
-**Sources (V5.3)** :
-| Source | Poids | Notes |
-|--------|-------|-------|
-| Twitter/X | 45% | Via Grok API - Real-time |
-| Reddit | 30% | PRAW API - WSB, stocks, pennystocks |
-| StockTwits | 25% | API - Sentiment labels (Bullish/Bearish) |
-| Google Trends | 0% | **Désactivé** (pytrends instable) |
-
-**Sentiment Boost** : +15% si Reddit ou StockTwits montrent un sentiment fortement bullish (ratio > 2.0)
+1. **Entry**: Watchlist only
+2. **Sizing**: Reduit si entry
+3. **Stop**: Tres tight
+4. **Target**: +10-20%
+5. **Timing**: Wait for upgrade to TIER 3+
 
 ---
 
-## 🔗 Ressources
+## Pre-Spike Radar Interpretation
 
-- **Installation** : Voir `DEPLOYMENT.md`
-- **Architecture** : Voir `README_DEV.md`
-- **Configuration** : Voir `config.py`
-- **Dashboard** : `streamlit run dashboards/streamlit_dashboard.py`
+| Level | Signals | Signification | Action |
+|-------|---------|---------------|--------|
+| NONE | 0/4 | Pas d'acceleration | Ignorer |
+| WATCH | 1/4 | Debut d'activite | Surveiller |
+| ELEVATED | 2/4 | Acceleration probable | Preparer entry |
+| HIGH | 3-4/4 | Spike imminent | Entry aggressive |
+
+### Signaux Pre-Spike
+
+| Signal | Interpretation |
+|--------|----------------|
+| Volume Acceleration | Smart money accumulating |
+| Bid-Ask Tightening | Liquidity providers positioning |
+| Price Compression | Volatility squeeze before breakout |
+| Dark Pool Activity | Institutional interest |
 
 ---
 
-**Version:** 5.3.1
-**Last Updated:** 2026-02-05
+## Repeat Gainer Badges
+
+| Badge | Spikes | Sizing |
+|-------|--------|--------|
+| KNOWN MOVER | 2 | Standard |
+| HOT REPEAT | 3-4 | Standard+ |
+| SERIAL RUNNER | 5+ | Adapte (volatil) |
+
+**Warning**: Serial runners = moves violents dans les 2 sens
+
+---
+
+## Timeline Detection V6
+
+```
+16:00-20:00 ET | AFTER-HOURS
+             | - News Flow + NLP Enrichi actif
+             | - Pre-Spike Radar scanning
+             | - Catalyst Score V3 calculating
+             | - Signaux: WATCH_EARLY
+
+04:00-09:30 ET | PRE-MARKET
+             | - PM confirmation gaps
+             | - Pre-Spike level update
+             | - Repeat Gainer check
+             | - Upgrades: WATCH_EARLY -> BUY
+             | - Signaux: BUY, BUY_STRONG
+
+09:30-16:00 ET | RTH
+             | - Monitoring positions
+             | - Trailing stops
+             | - Late BUY_STRONG (rares)
+```
+
+---
+
+## Risk Management V6
+
+### Regles d'Or
+
+1. **Stop-loss toujours**: Jamais de position sans stop
+2. **Max 5 positions**: Diversification obligatoire
+3. **Sizing par tier**: TIER 1 = max, TIER 5 = min
+4. **Repeat Gainer warning**: Size down si serial runner
+
+### Sizing par Signal + Tier
+
+| Signal | TIER 1-2 | TIER 3 | TIER 4-5 |
+|--------|----------|--------|----------|
+| WATCH_EARLY | 0% | 0% | 0% |
+| BUY | 2.5% | 2% | 1.5% |
+| BUY_STRONG | 3% | 2.5% | 2% |
+
+---
+
+## Performance Attendue V6
+
+| Metrique | Cible V6 |
+|----------|----------|
+| Hit Rate | 70-80% |
+| Early Catch (>2h) | 60-70% |
+| Avg Win | +50-90% |
+| Avg Loss | -8-12% |
+| Win/Loss Ratio | 4:1 |
+| Lead Time | 8-24h |
+
+---
+
+## Dashboard V6
+
+Le dashboard affiche maintenant:
+
+- **V6 Modules Status**: Catalyst V3, Pre-Spike, Repeat Gainer, NLP
+- **Signals avec badges V6**: Tier, Pre-Spike level, Repeat status
+- **Monster Score radar**: Includes V6 components
+
+```bash
+streamlit run dashboards/streamlit_dashboard.py
+```
+
+---
+
+**Version:** 6.0.0
+**Last Updated:** 2026-02-09

@@ -79,26 +79,37 @@ LOW       # Background info (decay: 48h)
 STALE     # Old news (decay: 168h)
 ```
 
-### Hiérarchie des Catalyst Types (V3)
+### Unified EVENT_TYPE Taxonomy (V6)
 
 ```python
-# Tier 1: Highest Impact (0.9-1.0)
-FDA_APPROVAL, BUYOUT_CONFIRMED, MAJOR_PARTNERSHIP
+# TIER 1 - CRITICAL IMPACT (0.90-1.00)
+FDA_APPROVAL           # Drug/device approved by FDA
+PDUFA_DECISION         # FDA PDUFA deadline decision
+BUYOUT_CONFIRMED       # Confirmed acquisition/buyout
 
-# Tier 2: High Impact (0.75-0.89)
-FDA_TRIAL_POSITIVE, EARNINGS_BEAT_BIG, MERGER_ANNOUNCEMENT,
-MAJOR_CONTRACT, GUIDANCE_RAISE
+# TIER 2 - HIGH IMPACT (0.75-0.89)
+FDA_TRIAL_POSITIVE     # Positive Phase II/III results
+BREAKTHROUGH_DESIGNATION # FDA breakthrough therapy
+FDA_FAST_TRACK         # FDA fast track granted
+MERGER_ACQUISITION     # M&A announcement
+EARNINGS_BEAT_BIG      # Earnings beat >20%
+MAJOR_CONTRACT         # Contract award >$50M
 
-# Tier 3: Medium Impact (0.5-0.74)
-ANALYST_UPGRADE, EARNINGS_BEAT, NEW_PRODUCT,
-PATENT_GRANTED, INSIDER_BUYING
+# TIER 3 - MODERATE IMPACT (0.60-0.74)
+GUIDANCE_RAISE         # Forward guidance increased
+EARNINGS_BEAT          # Standard earnings beat
+PARTNERSHIP            # Strategic partnership
+PRICE_TARGET_RAISE     # Analyst PT increase
 
-# Tier 4: Lower Impact (0.3-0.49)
-CONFERENCE_PRESENTATION, STOCK_BUYBACK,
-DIVIDEND_INCREASE, MANAGEMENT_CHANGE
+# TIER 4 - LOW-MODERATE IMPACT (0.45-0.59)
+ANALYST_UPGRADE        # Analyst rating upgrade
+SHORT_SQUEEZE_SIGNAL   # Short interest spike + covering
+UNUSUAL_VOLUME_NEWS    # Abnormal volume with news
 
-# Tier 5: Speculative (0.2-0.29)
-BUYOUT_RUMOR, FDA_SPECULATION, SOCIAL_MOMENTUM
+# TIER 5 - SPECULATIVE (0.30-0.44)
+BUYOUT_RUMOR           # Unconfirmed acquisition rumor
+SOCIAL_MEDIA_SURGE     # Viral social media mentions
+BREAKING_POSITIVE      # Generic positive breaking news
 ```
 
 ### Monster Score V3 - Nouveau Système de Poids
