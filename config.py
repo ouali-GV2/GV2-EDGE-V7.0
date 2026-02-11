@@ -91,7 +91,7 @@ AFTER_HOURS_END = "20:00"
 # ============================
 
 MAX_MARKET_CAP = 2_000_000_000   # 2B small caps
-MIN_PRICE = 1.0                  # ↑ Increased from 0.5 (avoid extreme penny stocks)
+MIN_PRICE = 0.0001               # Penny stocks inclus (OTC exclus séparément)
 MAX_PRICE = 20
 MIN_AVG_VOLUME = 500_000         # ↑ Increased from 300K (better liquidity)
 

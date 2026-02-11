@@ -4,12 +4,16 @@ UNIVERSE LOADER V2 - Enhanced Small Caps Filter
 
 Construit l'univers des small caps US avec filtres anti-manipulation:
 - Market cap filtering
-- OTC exclusion
-- Penny stock exclusion (price >= $1)
+- OTC Markets exclusion (OTCBB, Pink Sheets, etc.)
+- Penny stocks INCLUS (< $1 autorisé sur NASDAQ/NYSE)
 - Low float exclusion (float > 5M shares)
 - Volume filtering (avg > 500K)
 - SPAC & shell company exclusion
 - Proper error handling & caching
+
+Note: Les penny stocks listés sur les exchanges majeurs (NASDAQ, NYSE, AMEX)
+sont inclus car ils ont des obligations de reporting SEC. Seuls les OTC
+Markets sont exclus car moins réglementés.
 """
 
 import os
@@ -195,9 +199,9 @@ def filter_universe(stocks_df):
     ]
     logger.info(f"After market cap filter: {len(filtered)}")
     
-    # 2. Price filter (exclude penny stocks)
+    # 2. Price filter (penny stocks inclus, MIN_PRICE ~= 0)
     filtered = filtered[
-        (filtered["price"] >= MIN_PRICE) & 
+        (filtered["price"] >= MIN_PRICE) &
         (filtered["price"] <= MAX_PRICE)
     ]
     logger.info(f"After price filter: {len(filtered)}")
