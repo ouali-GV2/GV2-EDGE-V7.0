@@ -563,3 +563,127 @@ def get_context_scorer(config: Optional[ScorerConfig] = None) -> ContextScorer:
     if _scorer is None:
         _scorer = ContextScorer(config)
     return _scorer
+
+
+# ============================================================================
+# MARKET MEMORY STABILITY CHECK & SIGNAL ENRICHMENT
+# ============================================================================
+
+# Minimum requirements for Market Memory to be considered "stable"
+MIN_TOTAL_MISSES = 50           # Minimum missed signals tracked
+MIN_TRADES_RECORDED = 30        # Minimum trades recorded
+MIN_PATTERNS_LEARNED = 10       # Minimum patterns identified
+MIN_TICKER_PROFILES = 20        # Minimum ticker profiles built
+
+
+def is_market_memory_stable() -> Tuple[bool, Dict]:
+    """
+    Check if Market Memory has enough data to activate MRP/EP.
+
+    Returns:
+        Tuple of (is_stable, stats_dict)
+    """
+    scorer = get_context_scorer()
+    tracker = scorer._tracker
+    learner = scorer._learner
+
+    stats = {
+        "total_misses": tracker.get_stats().total_recorded if hasattr(tracker, 'get_stats') else 0,
+        "trades_recorded": len(learner._trades) if hasattr(learner, '_trades') else 0,
+        "patterns_learned": len(learner._patterns) if hasattr(learner, '_patterns') else 0,
+        "ticker_profiles": len(learner._profiles) if hasattr(learner, '_profiles') else 0,
+        "requirements": {
+            "min_misses": MIN_TOTAL_MISSES,
+            "min_trades": MIN_TRADES_RECORDED,
+            "min_patterns": MIN_PATTERNS_LEARNED,
+            "min_profiles": MIN_TICKER_PROFILES,
+        }
+    }
+
+    is_stable = (
+        stats["total_misses"] >= MIN_TOTAL_MISSES and
+        stats["trades_recorded"] >= MIN_TRADES_RECORDED and
+        stats["patterns_learned"] >= MIN_PATTERNS_LEARNED and
+        stats["ticker_profiles"] >= MIN_TICKER_PROFILES
+    )
+
+    stats["is_stable"] = is_stable
+    stats["missing"] = []
+
+    if stats["total_misses"] < MIN_TOTAL_MISSES:
+        stats["missing"].append(f"misses: {stats['total_misses']}/{MIN_TOTAL_MISSES}")
+    if stats["trades_recorded"] < MIN_TRADES_RECORDED:
+        stats["missing"].append(f"trades: {stats['trades_recorded']}/{MIN_TRADES_RECORDED}")
+    if stats["patterns_learned"] < MIN_PATTERNS_LEARNED:
+        stats["missing"].append(f"patterns: {stats['patterns_learned']}/{MIN_PATTERNS_LEARNED}")
+    if stats["ticker_profiles"] < MIN_TICKER_PROFILES:
+        stats["missing"].append(f"profiles: {stats['ticker_profiles']}/{MIN_TICKER_PROFILES}")
+
+    return is_stable, stats
+
+
+def enrich_signal_with_context(
+    signal,  # UnifiedSignal
+    force_enable: bool = False
+) -> None:
+    """
+    Enrich a UnifiedSignal with MRP/EP context scores.
+
+    IMPORTANT:
+    - Only activates when Market Memory is stable (or force_enable=True)
+    - MRP/EP are INFORMATIONAL ONLY, they don't block or modify execution
+    - This is a O(1) lookup operation, no latency impact
+
+    Args:
+        signal: UnifiedSignal to enrich (modified in place)
+        force_enable: Force enable even if memory not stable (for testing)
+    """
+    # Check if Market Memory is stable
+    is_stable, stats = is_market_memory_stable()
+
+    if not is_stable and not force_enable:
+        # Market Memory not ready - leave context fields empty
+        signal.context_active = False
+        return
+
+    # Only enrich actionable signals
+    if not signal.is_actionable():
+        signal.context_active = False
+        return
+
+    try:
+        scorer = get_context_scorer()
+
+        # Calculate context score (O(1) lookup from cache or quick calculation)
+        ctx = scorer.score(
+            ticker=signal.ticker,
+            signal_type=signal.signal_type.value,
+            signal_score=signal.monster_score * 100,
+            signal_price=signal.proposed_order.entry_price if signal.proposed_order else 0.0
+        )
+
+        # Populate context fields
+        signal.context_mrp = round(ctx.mrp.score, 1)
+        signal.context_ep = round(ctx.ep.score, 1)
+        signal.context_confidence = round(ctx.confidence, 1)
+        signal.context_active = True
+
+        logger.debug(
+            f"Context enrichment for {signal.ticker}: "
+            f"MRP={signal.context_mrp}, EP={signal.context_ep}, "
+            f"confidence={signal.context_confidence}"
+        )
+
+    except Exception as e:
+        logger.warning(f"Context enrichment failed for {signal.ticker}: {e}")
+        signal.context_active = False
+
+
+def get_memory_status() -> Dict:
+    """Get Market Memory status for monitoring."""
+    is_stable, stats = is_market_memory_stable()
+    return {
+        "stable": is_stable,
+        "stats": stats,
+        "mrp_ep_active": is_stable,
+    }

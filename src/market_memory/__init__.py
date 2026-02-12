@@ -74,6 +74,15 @@ from .context_scorer import (
     MRPScore,
     EPScore,
     get_context_scorer,
+    # Activation control
+    is_market_memory_stable,
+    enrich_signal_with_context,
+    get_memory_status,
+    # Thresholds
+    MIN_TOTAL_MISSES,
+    MIN_TRADES_RECORDED,
+    MIN_PATTERNS_LEARNED,
+    MIN_TICKER_PROFILES,
 )
 
 # Memory Store
@@ -109,6 +118,14 @@ __all__ = [
     "MRPScore",
     "EPScore",
     "get_context_scorer",
+    # Activation control
+    "is_market_memory_stable",
+    "enrich_signal_with_context",
+    "get_memory_status",
+    "MIN_TOTAL_MISSES",
+    "MIN_TRADES_RECORDED",
+    "MIN_PATTERNS_LEARNED",
+    "MIN_TICKER_PROFILES",
     # Memory Store
     "MemoryStore",
     "StoreConfig",

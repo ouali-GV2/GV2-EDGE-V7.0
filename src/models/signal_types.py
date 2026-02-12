@@ -289,6 +289,13 @@ class UnifiedSignal:
     # Pre-Halt state
     pre_halt_state: PreHaltState = PreHaltState.LOW
 
+    # === CONTEXT SCORES (MRP/EP - informational only, non-blocking) ===
+    # Activated only when Market Memory is stable (min_samples reached)
+    context_mrp: Optional[float] = None         # 0-100, Missed Recovery Potential
+    context_ep: Optional[float] = None          # 0-100, Edge Probability
+    context_confidence: Optional[float] = None  # 0-100, data confidence
+    context_active: bool = False                # True if MRP/EP are populated
+
     # === LAYER 2: PROPOSED ORDER (always computed for BUY signals) ===
     proposed_order: Optional[ProposedOrder] = None
 
@@ -359,6 +366,14 @@ class UnifiedSignal:
             "market_session": self.market_session,
             "account_mode": self.account_mode,
             "signal_preserved": self.signal_preserved,
+
+            # Context scores (MRP/EP) - only populated when Market Memory stable
+            "context": {
+                "active": self.context_active,
+                "mrp": self.context_mrp,
+                "ep": self.context_ep,
+                "confidence": self.context_confidence
+            } if self.context_active else None,
 
             "display": {
                 "final_signal": self.get_final_signal(),
