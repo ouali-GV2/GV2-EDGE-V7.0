@@ -1,5 +1,5 @@
 """
-DAILY AUDIT V6.0 - Mesure Quotidienne de Performance
+DAILY AUDIT V7.0 - Mesure Quotidienne de Performance
 =====================================================
 
 Exécution: Tous les jours à 20h30 UTC (après clôture US)
@@ -10,11 +10,12 @@ Objectif:
 - Identifier rapidement les dégradations de performance
 - Alimenter le système d'amélioration continue
 
-V6 Enhancements:
-- Catalyst Score V3 contribution analysis
-- Pre-Spike Radar accuracy tracking
-- Repeat Gainer Memory hit correlation
-- NLP Enrichi sentiment boost measurement
+V7 Architecture Tracking:
+- SignalProducer detection rate (all signals, never blocked)
+- ExecutionGate allowed vs blocked ratio
+- Block reason breakdown (trade limit, capital, risk guard, pre-halt)
+- Market Memory (MRP/EP) contribution analysis
+- Risk Guard trigger frequency
 
 Metrics clés:
 - hit_rate_daily: % des top gainers détectés
@@ -22,7 +23,7 @@ Metrics clés:
 - miss_rate: % des movers manqués
 - false_positives: signaux sans mouvement significatif
 - avg_lead_time: temps moyen avant explosion
-- v6_stats: V6 module performance breakdown
+- v7_stats: V7 module performance breakdown
 
 Usage:
     python daily_audit.py  # Exécute l'audit du jour

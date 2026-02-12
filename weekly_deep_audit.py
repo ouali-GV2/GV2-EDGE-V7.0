@@ -1,5 +1,5 @@
 """
-WEEKLY DEEP AUDIT V6.0 - Advanced Performance Analysis
+WEEKLY DEEP AUDIT V7.0 - Advanced Performance Analysis
 ======================================================
 
 Analyse complète de la performance du système:
@@ -9,12 +9,13 @@ Analyse complète de la performance du système:
 - Miss analysis (pourquoi certains movers sont manqués)
 - Auto-tuning recommendations
 
-V6 Enhancements:
-- Catalyst Score V3 trend analysis
-- Pre-Spike Radar hit correlation
-- Repeat Gainer Memory performance tracking
-- NLP Enrichi accuracy measurement
-- Weekly V6 module comparison
+V7 Architecture Tracking:
+- SignalProducer vs ExecutionGate funnel analysis
+- Block reason trends (which limits trigger most)
+- Market Memory MRP/EP correlation with actual outcomes
+- Risk Guard effectiveness (prevented losses)
+- Pre-Halt Engine accuracy (halt predictions)
+- Week-over-week comparison of V7 metrics
 
 Cette version compare les signaux AVANT vs les movers APRÈS.
 """

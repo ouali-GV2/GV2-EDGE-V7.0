@@ -1,6 +1,6 @@
-# GV2-EDGE V6.0 - Anticipation Multi-Layer System
+# GV2-EDGE V7.0 - Detection/Execution Separation Architecture
 
-**Version 6.0 - Full Anticipation Intelligence**
+**Version 7.0 - Full Signal Pipeline with Risk Management**
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -8,176 +8,199 @@
 
 ---
 
-## Nouveautes V6.0
+## Nouveautes V7.0
 
-### Architecture Anticipation Multi-Couches
+### Architecture Detection/Execution Separation
 
-**5 nouveaux modules d'intelligence pour detecter les mouvements AVANT tout le monde:**
-
-| Couche | Module | Description |
-|--------|--------|-------------|
-| 1 | **Market Calendar US** | Jours feries NYSE, demi-seances, ajustement volumes |
-| 2 | **Repeat Gainer Memory** | Tracking historique des repeat runners avec decay |
-| 3 | **Pre-Spike Radar** | Detection acceleration AVANT spike (4 signaux) |
-| 4 | **Catalyst Score V3** | Scoring par type, temporal decay, confluence |
-| 5 | **NLP Enrichi** | Sentiment avance, entites, categories, urgence |
-
-### Unified EVENT_TYPE Taxonomy
-
-**18 types d'evenements en 5 tiers:**
+**Principe fondamental: Detection JAMAIS bloquee, Execution uniquement limitee**
 
 ```
-TIER 1 - CRITICAL (0.90-1.00):
-  FDA_APPROVAL, PDUFA_DECISION, BUYOUT_CONFIRMED
+ANCIEN (V6):
+  Signal blocked? -> No signal visible
 
-TIER 2 - HIGH (0.75-0.89):
-  FDA_TRIAL_POSITIVE, BREAKTHROUGH_DESIGNATION, FDA_FAST_TRACK,
-  MERGER_ACQUISITION, EARNINGS_BEAT_BIG, MAJOR_CONTRACT
-
-TIER 3 - MODERATE (0.60-0.74):
-  GUIDANCE_RAISE, EARNINGS_BEAT, PARTNERSHIP, PRICE_TARGET_RAISE
-
-TIER 4 - LOW-MOD (0.45-0.59):
-  ANALYST_UPGRADE, SHORT_SQUEEZE_SIGNAL, UNUSUAL_VOLUME_NEWS
-
-TIER 5 - SPECULATIVE (0.30-0.44):
-  BUYOUT_RUMOR, SOCIAL_MEDIA_SURGE, BREAKING_POSITIVE
+NOUVEAU (V7):
+  Detection -> ALWAYS produces signal (visible)
+  Order -> ALWAYS calculated (visible)
+  Execution -> ONLY layer with limits (transparent)
 ```
 
-### Pre-Spike Radar (Nouveau)
+### 3-Layer Pipeline
 
-Detection d'acceleration AVANT le spike (pas le niveau, la derivee):
+| Layer | Module | Role | Bloque? |
+|-------|--------|------|---------|
+| 1 | **SignalProducer** | Detection de tous les signaux | JAMAIS |
+| 2 | **OrderComputer** | Calcul d'ordre (size, stop, target) | JAMAIS |
+| 3 | **ExecutionGate** | Application des limites | OUI (seul) |
 
-| Signal | Description |
+### Nouveaux Modules V7
+
+| Module | Description |
 |--------|-------------|
-| Volume Acceleration | Taux de changement volume croissant |
-| Bid-Ask Tightening | Spread qui se resserre |
-| Price Compression | Bollinger squeeze avant breakout |
-| Dark Pool Activity | Activite inhabituelle hors marche |
+| `src/engines/signal_producer.py` | Production de signaux (UnifiedSignal) |
+| `src/engines/order_computer.py` | Calcul d'ordres (ProposedOrder) |
+| `src/engines/execution_gate.py` | Gate d'execution (ExecutionDecision) |
+| `src/risk_guard/` | Unified risk assessment (dilution, compliance, halt) |
+| `src/market_memory/` | MRP/EP context enrichment |
+| `src/pre_halt_engine.py` | Detection pre-halt risk |
+| `src/ibkr_news_trigger.py` | Early news alerts via keywords |
+| `src/api_pool/` | Multi-key API management |
 
-**Alert Levels:** NONE < WATCH < ELEVATED < HIGH
+### Market Memory (MRP/EP)
 
-### Catalyst Score V3 (Nouveau)
+Contexte historique pour chaque signal:
 
-- **Type Weighting**: FDA > Earnings > Contract
-- **Temporal Decay**: Half-life 24h (events frais > anciens)
-- **Quality Assessment**: Fiabilite source + confirmation multi-sources
-- **Confluence Scoring**: Plusieurs catalysts = score plus eleve
-- **Performance Tracking**: Apprentissage historique
+- **MRP (Missed Recovery Potential)**: Score base sur les signaux manques precedents
+- **EP (Edge Probability)**: Probabilite de succes basee sur patterns similaires
+- **Auto-activation**: MRP/EP s'activent uniquement quand les donnees sont stables
 
-### NLP Enrichi (Nouveau)
+```python
+# Thresholds d'activation
+MIN_TOTAL_MISSES = 50
+MIN_TRADES_RECORDED = 30
+MIN_PATTERNS_LEARNED = 10
+MIN_TICKER_PROFILES = 20
+```
 
-- **Sentiment Avance**: Bullish/Bearish avec intensite et confiance
-- **Entity Extraction**: Tickers, personnes, produits, chiffres cles
-- **13 Categories News**: FDA_REGULATORY, MERGER_ACQUISITION, EARNINGS...
-- **5 Niveaux Urgence**: BREAKING, HIGH, MEDIUM, LOW, STALE
-- **Multi-Source Aggregation**: Time-weighted sentiment
+### Pre-Halt Engine
+
+Detection proactive du risque de halt:
+
+| State | Risk Level | Action |
+|-------|------------|--------|
+| NORMAL | Low | Execute normal |
+| ELEVATED | Medium | Reduce size 50% |
+| HIGH | High | Block execution |
+
+### Risk Guard
+
+Assessment unifie des risques:
+
+- **Dilution Detector**: ATM offerings, shelf registrations
+- **Compliance Checker**: Delisting risk, SEC issues
+- **Halt Monitor**: Current and imminent halts
 
 ---
 
 ## Vue d'Ensemble
 
-**GV2-EDGE** est un systeme automatise de trading momentum concu pour detecter **tres tot** les top gainers small caps du marche americain, idealement **avant ou au tout debut** de leurs hausses majeures (+50%, +100%, +200%).
+**GV2-EDGE** est un systeme automatise de trading momentum concu pour detecter **tres tot** les top gainers small caps du marche americain.
 
 ### Objectif Principal
 
-> Capter les mouvements explosifs **3 a 60 jours avant** qu'ils ne se produisent, avec un systeme rapide, robuste et oriente performance reelle.
+> Capter les mouvements explosifs **3 a 60 jours avant** qu'ils ne se produisent, avec transparence totale sur les signaux detectes vs executes.
 
-### Ce que GV2-EDGE fait
+### Ce que GV2-EDGE V7 fait
 
-- Predit les mouvements 7-60 jours a l'avance (via calendar events & intelligence)
-- Anticipe les setups 1-3 jours avant (via historical beat rate & social buzz)
-- Detecte en temps reel pendant le pre-market (4:00-9:30 AM)
+- Detecte TOUS les signaux (jamais bloque au niveau detection)
+- Calcule TOUS les ordres (visible meme si non execute)
+- Applique les limites UNIQUEMENT a l'execution
+- Montre les raisons de blocage (transparence)
+- Track les signaux manques pour apprentissage (Market Memory)
 - Alerte via Telegram avec plans de trade complets
-- S'ameliore continuellement via audits automatiques
 
 ---
 
-## Architecture V6.0
+## Architecture V7.0
 
 ```
-                    GV2-EDGE V6.0
-            Anticipation Multi-Layer System
+                    GV2-EDGE V7.0
+        Detection/Execution Separation Architecture
 
 +----------------------------------------------------------+
-|  COUCHE 1: MARKET CALENDAR US                            |
-|  utils/market_calendar.py                                |
-|  - Jours feries NYSE 2024-2027                          |
-|  - Demi-seances (early close)                           |
-|  - Ajustement volumes pour comparaison                  |
+|  LAYER 1: SIGNAL PRODUCER (Detection - Never Blocked)    |
+|  src/engines/signal_producer.py                          |
+|  - Monster Score computation                             |
+|  - Signal type determination (BUY/BUY_STRONG/WATCH)     |
+|  - Pre-spike state evaluation                           |
+|  Output: UnifiedSignal                                   |
 +----------------------------------------------------------+
                          |
 +----------------------------------------------------------+
-|  COUCHE 2: REPEAT GAINER MEMORY                          |
-|  src/repeat_gainer_memory.py                             |
-|  - Historique des top gainers                           |
-|  - Score "repeat runner" avec decay                      |
-|  - Boost multiplicateur Monster Score (1.5x max)        |
+|  ENRICHMENT: MARKET MEMORY (Context - Informational)     |
+|  src/market_memory/                                      |
+|  - MRP (Missed Recovery Potential)                       |
+|  - EP (Edge Probability)                                 |
+|  - Auto-activates when data stable                       |
+|  Output: context_mrp, context_ep, context_active         |
 +----------------------------------------------------------+
                          |
 +----------------------------------------------------------+
-|  COUCHE 3: PRE-SPIKE RADAR                               |
-|  src/pre_spike_radar.py                                  |
-|  - Volume acceleration (derivee)                        |
-|  - Options acceleration                                  |
-|  - Buzz acceleration                                     |
-|  - Technical compression                                 |
-|  - Alert levels: NONE < WATCH < ELEVATED < HIGH         |
-|  - Boost anticipatif (1.4x max)                         |
+|  LAYER 2: ORDER COMPUTER (Always Computed)               |
+|  src/engines/order_computer.py                           |
+|  - Position size calculation                             |
+|  - Stop-loss placement                                   |
+|  - Price target computation                              |
+|  Output: ProposedOrder added to signal                   |
 +----------------------------------------------------------+
                          |
 +----------------------------------------------------------+
-|  COUCHE 4: CATALYST SCORE V3                             |
-|  src/catalyst_score_v3.py                                |
-|  - Type weighting (5 tiers)                             |
-|  - Temporal decay (half-life 24h)                       |
-|  - Quality assessment                                    |
-|  - Confluence multi-catalyst                            |
-|  - Historical performance tracking                       |
-|  - Boost multiplicateur (1.6x max)                      |
+|  RISK ASSESSMENT: UNIFIED GUARD (Informational)          |
+|  src/risk_guard/                                         |
+|  - Dilution risk (ATM, offerings)                        |
+|  - Compliance risk (delisting, SEC)                      |
+|  - Halt status (current/imminent)                        |
+|  Output: RiskFlags for ExecutionGate                     |
 +----------------------------------------------------------+
                          |
 +----------------------------------------------------------+
-|  COUCHE 5: NLP ENRICHI                                   |
-|  src/nlp_enrichi.py                                      |
-|  - Enhanced sentiment analysis                           |
-|  - Entity extraction                                     |
-|  - 13 news categories                                    |
-|  - 5 urgency levels                                      |
-|  - Multi-source aggregation                              |
-|  - Boost multiplicateur (0.7x - 1.4x)                   |
+|  LAYER 3: EXECUTION GATE (Only Blocking Layer)           |
+|  src/engines/execution_gate.py                           |
+|  - Daily trade limit check                               |
+|  - Capital sufficiency check                             |
+|  - Risk flags evaluation                                 |
+|  - Pre-halt state evaluation                             |
+|  Output: ExecutionDecision (ALLOW/BLOCK + reasons)       |
 +----------------------------------------------------------+
                          |
 +----------------------------------------------------------+
-|  SIGNAL ENGINE                                           |
-|  - WATCH_EARLY: Catalyst detecte, potentiel             |
-|  - BUY: Score 0.65+ confirme                            |
-|  - BUY_STRONG: Score 0.80+ avec catalyst fort           |
+|  OUTPUT (All Signals Visible)                            |
+|  - Telegram Alerts (including blocked with reasons)      |
+|  - Signal Logger (full history)                          |
+|  - Market Memory (track misses for learning)             |
 +----------------------------------------------------------+
-                         |
-+----------------------------------------------------------+
-|  OUTPUT & AUDIT                                          |
-|  - Telegram Alerts V6 (emojis EVENT_TYPE, tiers)        |
-|  - Daily Audit V6 (module performance)                  |
-|  - Weekly Audit V6 (trend analysis)                     |
-|  - Dashboard V6 (module status)                         |
-+----------------------------------------------------------+
+```
+
+---
+
+## Configuration V7.0
+
+### config.py - Nouvelles Options
+
+```python
+# V7.0 Architecture
+USE_V7_ARCHITECTURE = True
+
+# Execution Gate
+DAILY_TRADE_LIMIT = 5
+MAX_POSITION_PCT = 0.10
+MAX_TOTAL_EXPOSURE = 0.80
+
+# Pre-Halt Engine
+ENABLE_PRE_HALT_ENGINE = True
+PRE_HALT_VOLATILITY_THRESHOLD = 3.0
+
+# Risk Guard
+ENABLE_RISK_GUARD = True
+RISK_BLOCK_ON_CRITICAL = True
+
+# Market Memory
+ENABLE_MARKET_MEMORY = True
+MARKET_MEMORY_MIN_MISSES = 50
 ```
 
 ---
 
 ## Performance
 
-### Metrics Attendues V6
+### Metrics V7
 
 | Metrique | Valeur Cible | Notes |
 |----------|--------------|-------|
-| **Hit Rate** | **70-80%** | Ameliore par Pre-Spike Radar + Catalyst V3 |
+| **Detection Rate** | **100%** | Tous les signaux detectes (jamais bloques) |
+| **Execution Rate** | **60-80%** | Signaux autorises par ExecutionGate |
+| **Hit Rate** | **70-80%** | Top gainers detectes |
 | **Early Catch Rate** | **60-70%** | Detection >2h avant explosion |
-| **Avg Lead Time** | **8-40 jours** | WATCH signals (calendar prediction) |
-| **Optimal Lead Time** | **4-8 heures** | BUY_STRONG (PM 4:00-9:30) |
-| **False Positive Rate** | **20-30%** | Reduit par NLP Enrichi |
-| **Max Drawdown** | **<15%** | Protection capital |
+| **MRP/EP Correlation** | **>0.6** | Quand actif |
 
 ---
 
@@ -195,7 +218,7 @@ Detection d'acceleration AVANT le spike (pas le niveau, la derivee):
 ```bash
 # 1. Clone le projet
 git clone <repo_url>
-cd GV2-EDGE-V6
+cd GV2-EDGE-V7
 
 # 2. Environnement virtuel
 python3 -m venv venv
@@ -211,29 +234,6 @@ cp .env.example .env
 
 ---
 
-## Configuration
-
-### Environment Variables (.env)
-
-```bash
-# Required
-GROK_API_KEY=xai-...
-FINNHUB_API_KEY=...
-TELEGRAM_BOT_TOKEN=...
-TELEGRAM_CHAT_ID=...
-
-# IBKR
-IBKR_HOST=127.0.0.1
-IBKR_PORT=7497  # 7497=paper, 7496=live
-
-# Optional Social APIs
-REDDIT_CLIENT_ID=...
-REDDIT_CLIENT_SECRET=...
-STOCKTWITS_ACCESS_TOKEN=...
-```
-
----
-
 ## Utilisation
 
 ### Demarrage
@@ -243,15 +243,15 @@ source venv/bin/activate
 python main.py
 ```
 
-### Workflow Automatique
+### Workflow V7
 
 ```
 03:00 AM UTC  -> Generate daily WATCH list
-04:00-09:30 ET -> Pre-market scanning
-09:30-16:00 ET -> Regular market monitoring
-16:00-20:00 ET -> After-hours catalyst scanning
-20:30 UTC     -> Daily Audit V6
-Friday 22:00  -> Weekly Deep Audit V6
+04:00-09:30 ET -> Pre-market: V7 cycle (detection + execution)
+09:30-16:00 ET -> RTH: V7 cycle every 3 min
+16:00-20:00 ET -> After-hours: Anticipation scanning
+20:30 UTC     -> Daily Audit V7
+Friday 22:00  -> Weekly Deep Audit V7
 ```
 
 ---
@@ -261,33 +261,35 @@ Friday 22:00  -> Weekly Deep Audit V6
 | Fichier | Description |
 |---------|-------------|
 | `README.md` | Vue d'ensemble (ce fichier) |
-| `README_DEV.md` | Guide developpeur V6 |
-| `README_TRADER.md` | Guide trader V6 |
+| `README_DEV.md` | Guide developpeur V7 |
+| `README_TRADER.md` | Guide trader V7 |
 | `DEPLOYMENT.md` | Guide deploiement |
 | `QUICKSTART.md` | Demarrage rapide |
 
 ---
 
-## Changelog V6.0
+## Changelog V7.0
 
-- **Market Calendar US**: NYSE holidays + early closes
-- **Repeat Gainer Memory**: Historical spike tracking with decay
-- **Pre-Spike Radar**: 4-signal acceleration detection before spike
-- **Catalyst Score V3**: Type weighting + temporal decay + confluence
-- **NLP Enrichi**: Advanced sentiment with entity extraction
-- **Unified EVENT_TYPE Taxonomy**: 18 types in 5 tiers
-- **Telegram Alerts V6**: Emojis par tier, Pre-Spike alerts, Repeat badges
-- **Daily/Weekly Audit V6**: V6 module performance tracking
-- **Dashboard V6**: V6 modules status section
-
----
-
-**GV2-EDGE V6.0 - Anticipation Multi-Layer System**
-
-*Detectez les top gainers AVANT tout le monde.*
+- **Detection/Execution Separation**: 3-layer pipeline
+- **SignalProducer**: Detection never blocked
+- **OrderComputer**: Orders always computed
+- **ExecutionGate**: Only blocking layer with transparency
+- **UnifiedSignal**: Complete signal state object
+- **Risk Guard**: Unified risk assessment
+- **Pre-Halt Engine**: Proactive halt risk detection
+- **Market Memory**: MRP/EP context enrichment
+- **IBKR News Trigger**: Keyword-based early alerts
+- **API Pool**: Multi-key management
+- **Missed Tracker**: Learn from blocked signals
 
 ---
 
-**Version:** 6.0.0
-**Last Updated:** 2026-02-09
+**GV2-EDGE V7.0 - Detection/Execution Separation Architecture**
+
+*Detectez TOUS les signaux. Controlez l'execution.*
+
+---
+
+**Version:** 7.0.0
+**Last Updated:** 2026-02-12
 **Status:** Production Ready

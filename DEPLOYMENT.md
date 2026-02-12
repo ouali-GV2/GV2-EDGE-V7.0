@@ -1,6 +1,8 @@
-# DEPLOYMENT GUIDE - GV2-EDGE V5.1
+# DEPLOYMENT GUIDE - GV2-EDGE V7.0
 
 Complete guide to install, configure, and deploy GV2-EDGE on a production server.
+
+**V7.0 Architecture**: Detection/Execution Separation with full transparency.
 
 ---
 
@@ -713,4 +715,4 @@ If hitting rate limits:
 
 ---
 
-*Last updated: 2026-02 - GV2-EDGE V5.3*
+*Last updated: 2026-02-12 - GV2-EDGE V7.0*

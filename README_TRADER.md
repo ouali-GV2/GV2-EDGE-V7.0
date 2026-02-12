@@ -1,4 +1,4 @@
-# GV2-EDGE V6.0 - Trader Guide
+# GV2-EDGE V7.0 - Trader Guide
 
 ## Objectif
 
@@ -8,271 +8,251 @@ GV2-EDGE detecte les top gainers small caps US **AVANT** leurs hausses majeures 
 
 ---
 
-## Nouveautes V6.0
+## Nouveautes V7.0
 
-### 5 Couches d'Anticipation
+### Transparence Totale
 
-| Couche | Module | Impact Trading |
-|--------|--------|----------------|
-| 1 | Market Calendar | Evite faux signaux jours feries |
-| 2 | Repeat Gainer | Badge "serial runner" = sizing adapte |
-| 3 | Pre-Spike Radar | Detection acceleration avant spike |
-| 4 | Catalyst Score V3 | Scoring par tier (FDA > Earnings) |
-| 5 | NLP Enrichi | Sentiment + urgence temps reel |
+**V7 montre TOUS les signaux, meme ceux bloques**
 
-### EVENT_TYPE Tiers
+| Avant (V6) | Apres (V7) |
+|------------|------------|
+| Signal bloque = invisible | Signal bloque = visible avec raison |
+| Pas de tracking des misses | Tracking complet pour apprentissage |
+| Blocage a plusieurs niveaux | Blocage uniquement a l'execution |
 
-```
-TIER 1 - CRITICAL (impact 0.90-1.00):
-  FDA_APPROVAL, PDUFA_DECISION, BUYOUT_CONFIRMED
-  -> Action: Entry immediate, sizing max
+### 3 Couches de Pipeline
 
-TIER 2 - HIGH (impact 0.75-0.89):
-  FDA_TRIAL_POSITIVE, BREAKTHROUGH_DESIGNATION, FDA_FAST_TRACK,
-  MERGER_ACQUISITION, EARNINGS_BEAT_BIG, MAJOR_CONTRACT
-  -> Action: Entry rapide, sizing standard+
+| Couche | Module | Bloque? | Visible? |
+|--------|--------|---------|----------|
+| 1 | SignalProducer | NON | OUI |
+| 2 | OrderComputer | NON | OUI |
+| 3 | ExecutionGate | OUI | OUI (avec raison) |
 
-TIER 3 - MODERATE (impact 0.60-0.74):
-  GUIDANCE_RAISE, EARNINGS_BEAT, PARTNERSHIP, PRICE_TARGET_RAISE
-  -> Action: Attendre confirmation PM
+### Nouvelles Metriques
 
-TIER 4 - LOW-MOD (impact 0.45-0.59):
-  ANALYST_UPGRADE, SHORT_SQUEEZE_SIGNAL, UNUSUAL_VOLUME_NEWS
-  -> Action: Watchlist seulement
-
-TIER 5 - SPECULATIVE (impact 0.30-0.44):
-  BUYOUT_RUMOR, SOCIAL_MEDIA_SURGE, BREAKING_POSITIVE
-  -> Action: Prudence, rumors non confirmees
-```
+| Metrique | Description |
+|----------|-------------|
+| **MRP** | Missed Recovery Potential - score base sur misses precedents |
+| **EP** | Edge Probability - probabilite de succes |
+| **Pre-Halt State** | Risque de halt (NORMAL/ELEVATED/HIGH) |
+| **Block Reasons** | Pourquoi l'execution est bloquee |
 
 ---
 
-## Signaux V6
+## Signaux V7
 
-### WATCH_EARLY
+### BUY_STRONG
 
-- **Quand**: Catalyst detecte en after-hours/pre-market
-- **Signification**: Potentiel en formation
-- **V6 Features**: Pre-Spike Radar level, NLP sentiment
-- **Action**: Surveiller, preparer entry
-- **Sizing**: Aucun (attendre upgrade)
+- **Quand**: Score 0.80+ + catalyst fort
+- **Execution**: Si autorise par ExecutionGate
+- **MRP/EP**: Affiche si actif
+- **Action**: Entry immediate si autorise
+- **Sizing**: 3% risk max
 
 ### BUY
 
 - **Quand**: Score 0.65-0.79 + confirmation technique
-- **Signification**: Setup solide
-- **V6 Features**: Catalyst tier afiche, Repeat badge si applicable
-- **Action**: Entry standard
+- **Execution**: Si autorise par ExecutionGate
+- **Action**: Entry standard si autorise
 - **Sizing**: 2% risk
 
-### BUY_STRONG
+### WATCH
 
-- **Quand**: Score 0.80+ + catalyst TIER 1-2
-- **Signification**: Opportunite majeure
-- **V6 Features**: Full V6 intelligence display
-- **Action**: Entry immediate
-- **Sizing**: 3% risk max
+- **Quand**: Potentiel detecte, pas encore confirme
+- **Execution**: Non (observation seulement)
+- **Action**: Surveiller, preparer entry
+- **Sizing**: 0% (pas d'entry)
+
+### Signal BLOQUE
+
+- **Quand**: ExecutionGate refuse l'execution
+- **Visible**: OUI (avec raisons)
+- **Action**: Comprendre la raison, noter pour apprentissage
+- **Raisons possibles**:
+  - `DAILY_TRADE_LIMIT` - Max trades du jour atteint
+  - `CAPITAL_INSUFFICIENT` - Pas assez de capital
+  - `PRE_HALT_HIGH` - Risque de halt eleve
+  - `DILUTION_HIGH` - Risque de dilution
+  - `COMPLIANCE_HIGH` - Risque compliance
 
 ---
 
-## Alertes Telegram V6
+## Alertes Telegram V7
 
-### Format Signal V6
+### Format Signal Autorise
 
 ```
-[SIGNAL_EMOJI] GV2-EDGE V6.0 SIGNAL
+[SIGNAL_EMOJI] GV2-EDGE V7.0 SIGNAL
 
 Ticker: NVDA
 Signal: BUY_STRONG
 Monster Score: 0.85
-Confidence: 0.92
 
---- V6 Intelligence ---
-[EVENT_EMOJI] Event: FDA_APPROVAL
-TIER 1 - CRITICAL (impact: 0.95)
-Catalyst Score V3: 0.88
-NLP Sentiment: VERY_BULLISH
-Pre-Spike Radar: 3/4 signals
-REPEAT GAINER (4 past spikes)
+--- V7 Intelligence ---
+Pre-Halt: NORMAL
+MRP: 72 | EP: 68
 
 --- Position ---
 Entry: $152.50
 Stop: $148.20
 Shares: 45
 Risk: $193.50
+
+V7.0 | NORMAL
 ```
 
-### Alert Pre-Spike Radar
+### Format Signal Bloque
 
 ```
-PRE-SPIKE RADAR ALERT
+[NO_ENTRY] GV2-EDGE V7.0 SIGNAL
 
 Ticker: BIOX
-HIGH (3/4 signals)
-
-Active Signals:
-[CHECK] Volume Acceleration
-[CHECK] Bid-Ask Tightening
-[CHECK] Price Compression
-[X] Dark Pool Activity
-
-Acceleration Score: 0.78
+Signal: BUY (BLOCKED)
 Monster Score: 0.72
 
-ACTION: Monitor closely for entry
-```
+--- V7 Intelligence ---
+Pre-Halt: ELEVATED
 
-### Alert Repeat Gainer
+BLOCKED: DAILY_TRADE_LIMIT, PRE_HALT_ELEVATED
 
-```
-REPEAT GAINER DETECTED
-
-Ticker: MARA
-SERIAL RUNNER
-
-Historical Spikes: 7
-Avg Spike: +65.2%
-Last Spike: 2026-01-15
-Volatility Score: 0.82
-
-Current Monster Score: 0.75
-
-WARNING: Known for explosive moves - size appropriately
+Signal detecte mais execution bloquee
 ```
 
 ---
 
-## Strategie par Tier
+## Pre-Halt State
 
-### TIER 1 (FDA_APPROVAL, BUYOUT_CONFIRMED)
+| State | Signification | Action |
+|-------|---------------|--------|
+| NORMAL | Pas de risque detecte | Execute normal |
+| ELEVATED | Volatilite anormale | Taille reduite 50% |
+| HIGH | Risque de halt imminent | Execution bloquee |
 
-1. **Entry**: Immediate sur alerte
-2. **Sizing**: Max (3% risk)
-3. **Stop**: Large (volatilite FDA)
-4. **Target**: +50% minimum
-5. **Timing**: Market order OK
+### Indicateurs Pre-Halt
 
-### TIER 2 (FDA_TRIAL_POSITIVE, EARNINGS_BEAT_BIG)
-
-1. **Entry**: PM open ou early RTH
-2. **Sizing**: Standard+ (2.5% risk)
-3. **Stop**: ATR-based
-4. **Target**: +30-50%
-5. **Timing**: Limit preferred
-
-### TIER 3 (EARNINGS_BEAT, PARTNERSHIP)
-
-1. **Entry**: Attendre confirmation PM
-2. **Sizing**: Standard (2% risk)
-3. **Stop**: Tight
-4. **Target**: +20-30%
-5. **Timing**: PM confirmation required
-
-### TIER 4-5 (ANALYST_UPGRADE, RUMORS)
-
-1. **Entry**: Watchlist only
-2. **Sizing**: Reduit si entry
-3. **Stop**: Tres tight
-4. **Target**: +10-20%
-5. **Timing**: Wait for upgrade to TIER 3+
+- Volatilite > 3x moyenne
+- Mouvement prix > 15% intraday
+- Keywords halt dans news
+- Volume anormal
 
 ---
 
-## Pre-Spike Radar Interpretation
+## MRP/EP (Market Memory)
 
-| Level | Signals | Signification | Action |
-|-------|---------|---------------|--------|
-| NONE | 0/4 | Pas d'acceleration | Ignorer |
-| WATCH | 1/4 | Debut d'activite | Surveiller |
-| ELEVATED | 2/4 | Acceleration probable | Preparer entry |
-| HIGH | 3-4/4 | Spike imminent | Entry aggressive |
+### MRP (Missed Recovery Potential)
 
-### Signaux Pre-Spike
+Score 0-100 base sur les signaux manques precedents:
+- MRP eleve = ce ticker a souvent ete manque et a bien performe
+- Utilise pour ajuster la confiance
 
-| Signal | Interpretation |
-|--------|----------------|
-| Volume Acceleration | Smart money accumulating |
-| Bid-Ask Tightening | Liquidity providers positioning |
-| Price Compression | Volatility squeeze before breakout |
-| Dark Pool Activity | Institutional interest |
+### EP (Edge Probability)
 
----
+Score 0-100 base sur patterns similaires:
+- EP eleve = patterns similaires ont bien performe
+- Utilise pour sizing
 
-## Repeat Gainer Badges
+### Activation
 
-| Badge | Spikes | Sizing |
-|-------|--------|--------|
-| KNOWN MOVER | 2 | Standard |
-| HOT REPEAT | 3-4 | Standard+ |
-| SERIAL RUNNER | 5+ | Adapte (volatil) |
+MRP/EP s'activent UNIQUEMENT quand Market Memory a assez de donnees:
+- 50+ misses tracked
+- 30+ trades recorded
+- 10+ patterns learned
+- 20+ ticker profiles
 
-**Warning**: Serial runners = moves violents dans les 2 sens
+Avant activation: `context_active = False`
 
 ---
 
-## Timeline Detection V6
+## Raisons de Blocage
+
+### DAILY_TRADE_LIMIT
+
+- **Cause**: Max 5 trades/jour atteint
+- **Solution**: Attendre demain
+- **Note**: Signal track pour Market Memory
+
+### CAPITAL_INSUFFICIENT
+
+- **Cause**: Pas assez de cash disponible
+- **Solution**: Liberer du capital
+- **Note**: Position existante bloque les fonds
+
+### PRE_HALT_HIGH
+
+- **Cause**: Risque de halt detecte
+- **Solution**: Attendre stabilisation
+- **Note**: Protege contre halt losses
+
+### DILUTION_HIGH
+
+- **Cause**: ATM offering detecte
+- **Solution**: Eviter ou reduire taille
+- **Note**: Risk Guard protection
+
+### COMPLIANCE_HIGH
+
+- **Cause**: Risque delisting/SEC
+- **Solution**: Eviter
+- **Note**: Protection compliance
+
+---
+
+## Timeline V7
 
 ```
 16:00-20:00 ET | AFTER-HOURS
-             | - News Flow + NLP Enrichi actif
-             | - Pre-Spike Radar scanning
-             | - Catalyst Score V3 calculating
-             | - Signaux: WATCH_EARLY
+             | - Detection anticipative
+             | - News scanning
+             | - Signaux: WATCH, BUY (rare)
 
 04:00-09:30 ET | PRE-MARKET
-             | - PM confirmation gaps
-             | - Pre-Spike level update
-             | - Repeat Gainer check
-             | - Upgrades: WATCH_EARLY -> BUY
+             | - Confirmation PM
+             | - V7 cycle (detection + execution)
              | - Signaux: BUY, BUY_STRONG
 
 09:30-16:00 ET | RTH
-             | - Monitoring positions
-             | - Trailing stops
-             | - Late BUY_STRONG (rares)
+             | - V7 cycle every 3 min
+             | - Tous signaux possibles
+             | - Execution Gate active
+
+20:30 UTC     | DAILY AUDIT
+             | - Performance du jour
+             | - Blocked vs Allowed ratio
 ```
 
 ---
 
-## Risk Management V6
+## Risk Management V7
 
 ### Regles d'Or
 
 1. **Stop-loss toujours**: Jamais de position sans stop
-2. **Max 5 positions**: Diversification obligatoire
-3. **Sizing par tier**: TIER 1 = max, TIER 5 = min
-4. **Repeat Gainer warning**: Size down si serial runner
+2. **Max 5 trades/jour**: Applique par ExecutionGate
+3. **Max 10% par position**: Protection capital
+4. **Pre-Halt respect**: Si HIGH, pas d'entry
+5. **Comprendre les blocks**: Apprendre des raisons
 
-### Sizing par Signal + Tier
+### Sizing par Signal
 
-| Signal | TIER 1-2 | TIER 3 | TIER 4-5 |
-|--------|----------|--------|----------|
-| WATCH_EARLY | 0% | 0% | 0% |
-| BUY | 2.5% | 2% | 1.5% |
-| BUY_STRONG | 3% | 2.5% | 2% |
-
----
-
-## Performance Attendue V6
-
-| Metrique | Cible V6 |
-|----------|----------|
-| Hit Rate | 70-80% |
-| Early Catch (>2h) | 60-70% |
-| Avg Win | +50-90% |
-| Avg Loss | -8-12% |
-| Win/Loss Ratio | 4:1 |
-| Lead Time | 8-24h |
+| Signal | Condition | Sizing |
+|--------|-----------|--------|
+| BUY_STRONG | Autorise | 3% risk |
+| BUY_STRONG | Pre-Halt ELEVATED | 1.5% risk |
+| BUY | Autorise | 2% risk |
+| BUY | Pre-Halt ELEVATED | 1% risk |
+| BLOCKED | - | 0% |
 
 ---
 
-## Dashboard V6
+## Dashboard V7
 
-Le dashboard affiche maintenant:
+Le dashboard affiche:
 
-- **V6 Modules Status**: Catalyst V3, Pre-Spike, Repeat Gainer, NLP
-- **Signals avec badges V6**: Tier, Pre-Spike level, Repeat status
-- **Monster Score radar**: Includes V6 components
+- **V7 Modules Status**: SignalProducer, OrderComputer, ExecutionGate, RiskGuard
+- **Execution Stats**: Allowed vs Blocked ratio
+- **Block Reasons**: Distribution des raisons
+- **Market Memory Status**: MRP/EP activation state
+- **Pre-Halt Alerts**: Tickers avec risque halt
 
 ```bash
 streamlit run dashboards/streamlit_dashboard.py
@@ -280,5 +260,28 @@ streamlit run dashboards/streamlit_dashboard.py
 
 ---
 
-**Version:** 6.0.0
-**Last Updated:** 2026-02-09
+## Performance V7
+
+| Metrique | Cible |
+|----------|-------|
+| Detection Rate | 100% (jamais bloque) |
+| Execution Rate | 60-80% |
+| Hit Rate | 70-80% |
+| Early Catch | 60-70% |
+| Avg Win | +50-90% |
+| Avg Loss | -8-12% |
+
+---
+
+## Conseils V7
+
+1. **Lisez les raisons de blocage** - Elles sont la pour vous proteger
+2. **Respectez Pre-Halt** - Ne forcez pas si HIGH
+3. **Utilisez MRP/EP** - Quand actif, c'est un edge supplementaire
+4. **Track vos misses** - Ils alimentent Market Memory
+5. **Attendez l'activation** - MRP/EP dormants au debut = normal
+
+---
+
+**Version:** 7.0.0
+**Last Updated:** 2026-02-12

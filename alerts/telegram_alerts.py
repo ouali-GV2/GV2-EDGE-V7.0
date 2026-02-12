@@ -1,15 +1,18 @@
 """
-GV2-EDGE V6.0 — Telegram Alerts System
+GV2-EDGE V7.0 — Telegram Alerts System
 =======================================
 
 Alertes enrichies avec:
+- V7.0 Architecture (SignalProducer -> OrderComputer -> ExecutionGate)
+- UnifiedSignal support (detection always visible, execution gated)
+- MRP/EP Context (Market Memory) badges
+- Pre-Halt Engine alerts
+- IBKR News Trigger integration
+- Risk Guard status (dilution, compliance, halt)
+- Blocked signals notification (full transparency)
 - EVENT_TYPE emojis (18 types, 5 tiers)
-- Catalyst Score V3 integration
-- NLP Enrichi sentiment badges
-- Pre-Spike Radar alerts
-- Repeat Gainer badges
 
-Architecture V6 Anticipation Multi-Layer
+Architecture V7 Detection/Execution Separation
 """
 
 import requests
@@ -171,84 +174,105 @@ def send_message(text: str, parse_mode: str = "Markdown") -> bool:
 
 
 # ============================
-# V6 Signal Alert (Enhanced)
+# V7 Signal Alert (Enhanced)
 # ============================
 
 def send_signal_alert(
     signal: Dict[str, Any],
     position: Optional[Dict[str, Any]] = None,
-    v6_data: Optional[Dict[str, Any]] = None
+    v7_data: Optional[Dict[str, Any]] = None
 ):
     """
-    Send enhanced V6 signal alert
+    Send enhanced V7.0 signal alert
+
+    Supports both legacy dict format and V7 UnifiedSignal fields.
+    V7 shows ALL signals (detection never blocked) with execution status.
 
     Args:
-        signal: Signal data (ticker, signal, monster_score, confidence)
+        signal: Signal data (ticker, signal, monster_score, confidence, notes)
         position: Optional position data (entry, stop, shares, risk_amount)
-        v6_data: Optional V6 enrichment data:
-            - event_type: EVENT_TYPE from unified taxonomy
-            - event_impact: Impact score 0-1
-            - catalyst_score: Catalyst Score V3 value
-            - nlp_sentiment: NLP Enrichi sentiment direction
-            - pre_spike_signals: Pre-Spike Radar signals count
-            - repeat_gainer: Boolean if repeat gainer
-            - repeat_gainer_spikes: Number of past spikes
+        v7_data: Optional V7 enrichment data:
+            - pre_halt_state: Pre-halt risk state
+            - context_mrp: MRP score (0-100)
+            - context_ep: EP score (0-100)
+            - context_active: Boolean if MRP/EP active
+            - execution_blocked: Boolean if execution blocked
+            - block_reasons: List of block reasons
+            - risk_flags: Dict of risk assessments
     """
     ticker = signal.get('ticker', 'UNKNOWN')
     signal_type = signal.get('signal', signal.get('signal_type', 'BUY'))
     monster_score = signal.get('monster_score', 0)
     confidence = signal.get('confidence', 0)
+    notes = signal.get('notes', '')
+
+    # Check if signal is blocked (V7)
+    is_blocked = "(BLOCKED)" in signal_type or signal.get('blocked', False)
+    clean_signal = signal_type.replace(" (BLOCKED)", "")
 
     # Signal emoji
-    signal_emoji = get_signal_emoji(signal_type)
+    signal_emoji = get_signal_emoji(clean_signal)
+    if is_blocked:
+        signal_emoji = "\U0001F6AB"  # No entry
 
     # Build header
     msg = f"""
-{signal_emoji} *GV2-EDGE V6.0 SIGNAL*
+{signal_emoji} *GV2-EDGE V7.0 SIGNAL*
 
 \U0001F4CA Ticker: `{ticker}`
 \U000026A1 Signal: *{signal_type}*
 \U0001F3AF Monster Score: `{monster_score:.2f}`
-\U0001F4C8 Confidence: `{confidence:.2f}`
 """
 
-    # V6 enrichments
-    if v6_data:
-        event_type = v6_data.get('event_type')
-        event_impact = v6_data.get('event_impact', 0)
-        catalyst_score = v6_data.get('catalyst_score')
-        nlp_sentiment = v6_data.get('nlp_sentiment')
-        pre_spike_signals = v6_data.get('pre_spike_signals', 0)
-        repeat_gainer = v6_data.get('repeat_gainer', False)
-        repeat_gainer_spikes = v6_data.get('repeat_gainer_spikes', 0)
+    if confidence > 0:
+        msg += f"\U0001F4C8 Confidence: `{confidence:.2f}`\n"
 
-        msg += "\n*--- V6 Intelligence ---*\n"
+    # V7 enrichments
+    if v7_data:
+        pre_halt = v7_data.get('pre_halt_state', 'NORMAL')
+        context_mrp = v7_data.get('context_mrp')
+        context_ep = v7_data.get('context_ep')
+        context_active = v7_data.get('context_active', False)
+        block_reasons = v7_data.get('block_reasons', [])
+        risk_flags = v7_data.get('risk_flags', {})
 
-        # Event type with tier
+        msg += "\n*--- V7 Intelligence ---*\n"
+
+        # Pre-Halt State
+        if pre_halt != 'NORMAL':
+            halt_emoji = "\U0001F534" if pre_halt == 'HIGH' else "\U0001F7E0"
+            msg += f"{halt_emoji} Pre-Halt: `{pre_halt}`\n"
+
+        # MRP/EP Context (Market Memory)
+        if context_active and context_mrp is not None:
+            msg += f"\U0001F4CA MRP: `{context_mrp:.0f}` | EP: `{context_ep:.0f}`\n"
+
+        # Risk Flags
+        if risk_flags:
+            dilution = risk_flags.get('dilution_risk', 'LOW')
+            compliance = risk_flags.get('compliance_risk', 'LOW')
+            if dilution != 'LOW' or compliance != 'LOW':
+                msg += f"\U000026A0 Risk: Dilution={dilution}, Compliance={compliance}\n"
+
+        # Block reasons
+        if block_reasons:
+            msg += f"\U0001F6AB Blocked: `{', '.join(block_reasons)}`\n"
+
+    # Legacy V6 data support
+    elif 'event_type' in signal or 'catalyst_score' in signal:
+        event_type = signal.get('event_type')
+        event_impact = signal.get('event_impact', 0)
+
         if event_type:
             event_emoji = get_event_emoji(event_type)
             tier = get_tier_from_impact(event_impact)
             tier_label = get_tier_label(tier)
-            msg += f"{event_emoji} Event: `{event_type}`\n"
-            msg += f"\U0001F3C5 {tier_label} (impact: {event_impact:.2f})\n"
+            msg += f"\n{event_emoji} Event: `{event_type}`\n"
+            msg += f"\U0001F3C5 {tier_label}\n"
 
-        # Catalyst Score V3
-        if catalyst_score and catalyst_score > 0:
-            msg += f"\U0001F9EA Catalyst Score V3: `{catalyst_score:.2f}`\n"
-
-        # NLP Sentiment
-        if nlp_sentiment:
-            sentiment_emoji = get_sentiment_emoji(nlp_sentiment)
-            msg += f"{sentiment_emoji} NLP Sentiment: `{nlp_sentiment}`\n"
-
-        # Pre-Spike Radar
-        if pre_spike_signals > 0:
-            radar_level = "\U0001F534" if pre_spike_signals >= 3 else "\U0001F7E1"
-            msg += f"{radar_level} Pre-Spike Radar: `{pre_spike_signals}/4` signals\n"
-
-        # Repeat Gainer badge
-        if repeat_gainer:
-            msg += f"\U0001F501 REPEAT GAINER ({repeat_gainer_spikes} past spikes)\n"
+    # Notes (from main.py)
+    if notes:
+        msg += f"\n\U0001F4DD `{notes}`\n"
 
     # Position info
     if position:
@@ -258,7 +282,6 @@ def send_signal_alert(
 \U0001F6D1 Stop: `{position.get('stop', 'N/A')}`
 \U0001F4E6 Shares: `{position.get('shares', 'N/A')}`
 \U00002696 Risk: `${position.get('risk_amount', 'N/A')}`
-\U0001F551 Session: `{position.get('session', 'N/A')}`
 """
 
     send_message(msg)
@@ -517,7 +540,7 @@ def send_daily_audit_alert(report: Dict[str, Any]):
     avg_lead = summary.get('avg_lead_time_hours', 0)
 
     msg = f"""
-\U0001F4CA *GV2-EDGE V6.0 DAILY AUDIT*
+\U0001F4CA *GV2-EDGE V7.0 DAILY AUDIT*
 \U0001F4C5 Date: `{audit_date}`
 
 {grade_emoji.get(grade, '\U00002753')} *Performance Grade: {grade}*
@@ -530,22 +553,25 @@ def send_daily_audit_alert(report: Dict[str, Any]):
 \U0001F3AF False Positives: `{fp_count}`
 """
 
-    # V6 Module Stats if available
-    v6_stats = report.get("v6_stats", {})
-    if v6_stats:
-        msg += "\n*--- V6 Module Performance ---*\n"
+    # V7 Module Stats
+    v7_stats = report.get("v7_stats", report.get("v6_stats", {}))
+    if v7_stats:
+        msg += "\n*--- V7 Module Performance ---*\n"
 
-        if 'catalyst_v3_contribution' in v6_stats:
-            msg += f"\U0001F9EA Catalyst V3: `{v6_stats['catalyst_v3_contribution']:.1f}%` of hits\n"
+        if 'signals_produced' in v7_stats:
+            msg += f"\U0001F4E1 Signals Produced: `{v7_stats['signals_produced']}`\n"
 
-        if 'pre_spike_accuracy' in v6_stats:
-            msg += f"\U0001F4E1 Pre-Spike Radar: `{v6_stats['pre_spike_accuracy']:.1f}%` accuracy\n"
+        if 'signals_blocked' in v7_stats:
+            msg += f"\U0001F6AB Signals Blocked: `{v7_stats['signals_blocked']}`\n"
 
-        if 'repeat_gainer_hits' in v6_stats:
-            msg += f"\U0001F501 Repeat Gainer Hits: `{v6_stats['repeat_gainer_hits']}`\n"
+        if 'mrp_ep_active' in v7_stats:
+            msg += f"\U0001F9E0 MRP/EP Active: `{v7_stats['mrp_ep_active']}`\n"
 
-        if 'nlp_sentiment_boost' in v6_stats:
-            msg += f"\U0001F9E0 NLP Sentiment Avg Boost: `+{v6_stats['nlp_sentiment_boost']:.2f}`\n"
+        if 'pre_halt_triggers' in v7_stats:
+            msg += f"\U000026A0 Pre-Halt Triggers: `{v7_stats['pre_halt_triggers']}`\n"
+
+        if 'risk_guard_blocks' in v7_stats:
+            msg += f"\U0001F6E1 Risk Guard Blocks: `{v7_stats['risk_guard_blocks']}`\n"
 
     # Top hits
     hit_analysis = report.get("hit_analysis", {})
@@ -583,7 +609,7 @@ def send_weekly_audit_alert(report: Dict[str, Any]):
     trend_emoji = "\U0001F4C8" if trend == "improving" else "\U0001F4C9" if trend == "declining" else "\U00002796"
 
     msg = f"""
-\U0001F4CA *GV2-EDGE V6.0 WEEKLY AUDIT*
+\U0001F4CA *GV2-EDGE V7.0 WEEKLY AUDIT*
 \U0001F4C5 Period: `{period.get('start', 'N/A')}` to `{period.get('end', 'N/A')}`
 \U0001F4C6 Days with data: `{period.get('days_with_data', 0)}`
 
@@ -636,7 +662,7 @@ def send_system_alert(text: str, level: str = "info"):
 
     emoji, label = level_config.get(level, level_config["info"])
 
-    msg = f"{emoji} *GV2-EDGE V6.0 {label}*\n\n{text}"
+    msg = f"{emoji} *GV2-EDGE V7.0 {label}*\n\n{text}"
     send_message(msg)
 
 
@@ -672,30 +698,143 @@ def send_session_alert(session: str, active_signals: int = 0):
 
 
 # ============================
+# Pre-Halt Alert (V7)
+# ============================
+
+def send_pre_halt_alert(
+    ticker: str,
+    pre_halt_state: str,
+    risk_level: str,
+    recommendation: str,
+    size_multiplier: float
+):
+    """
+    Send Pre-Halt Engine alert when halt risk detected
+
+    Args:
+        ticker: Stock ticker
+        pre_halt_state: NORMAL, ELEVATED, HIGH
+        risk_level: Overall risk assessment
+        recommendation: EXECUTE, WAIT, REDUCE, BLOCKED
+        size_multiplier: Position size adjustment (0.0-1.0)
+    """
+    state_emoji = {
+        "NORMAL": "\U0001F7E2",
+        "ELEVATED": "\U0001F7E0",
+        "HIGH": "\U0001F534"
+    }
+
+    rec_emoji = {
+        "EXECUTE": "\U00002705",
+        "WAIT": "\U000023F0",
+        "REDUCE": "\U000026A0",
+        "BLOCKED": "\U0001F6AB"
+    }
+
+    msg = f"""
+{state_emoji.get(pre_halt_state, '\U00002753')} *PRE-HALT ENGINE ALERT*
+
+\U0001F4CA Ticker: `{ticker}`
+\U000026A0 Halt Risk: *{pre_halt_state}*
+
+{rec_emoji.get(recommendation, '\U00002753')} Recommendation: `{recommendation}`
+\U0001F4CA Size Multiplier: `{size_multiplier*100:.0f}%`
+
+*Monitor closely - halt risk elevated*
+"""
+
+    send_message(msg)
+
+
+# ============================
+# News Trigger Alert (V7)
+# ============================
+
+def send_news_trigger_alert(
+    ticker: str,
+    headline: str,
+    trigger_type: str,
+    trigger_level: str,
+    actions: List[str]
+):
+    """
+    Send IBKR News Trigger alert for early news detection
+
+    Args:
+        ticker: Stock ticker
+        headline: News headline
+        trigger_type: HALT_RISK, CATALYST_MAJOR, SPIKE_FORMING, RISK_ALERT
+        trigger_level: CRITICAL, HIGH, MEDIUM, LOW
+        actions: Recommended actions list
+    """
+    level_emoji = {
+        "CRITICAL": "\U0001F6A8",
+        "HIGH": "\U0001F534",
+        "MEDIUM": "\U0001F7E0",
+        "LOW": "\U0001F7E1"
+    }
+
+    type_emoji = {
+        "HALT_RISK": "\U000026D4",
+        "CATALYST_MAJOR": "\U0001F4A5",
+        "SPIKE_FORMING": "\U0001F4C8",
+        "RISK_ALERT": "\U000026A0"
+    }
+
+    msg = f"""
+{level_emoji.get(trigger_level, '\U0001F4F0')} *IBKR NEWS TRIGGER*
+
+\U0001F4CA Ticker: `{ticker}`
+{type_emoji.get(trigger_type, '\U0001F4F0')} Type: `{trigger_type}`
+Level: *{trigger_level}*
+
+\U0001F4F0 _{headline[:150]}_
+
+*Actions:*
+"""
+
+    for action in actions[:3]:
+        msg += f"\U00002022 {action}\n"
+
+    send_message(msg)
+
+
+# ============================
 # Test Connection
 # ============================
 
 if __name__ == "__main__":
     # Test basic connection
-    send_message("\U00002705 GV2-EDGE V6.0 Telegram connected")
+    send_message("\U00002705 GV2-EDGE V7.0 Telegram connected")
 
-    # Test V6 signal alert
+    # Test V7 signal alert
     test_signal = {
         "ticker": "TEST",
         "signal": "BUY_STRONG",
         "monster_score": 0.85,
-        "confidence": 0.92
+        "confidence": 0.92,
+        "notes": "V7.0 | NORMAL"
     }
 
-    test_v6_data = {
-        "event_type": "FDA_APPROVAL",
-        "event_impact": 0.95,
-        "catalyst_score": 0.88,
-        "nlp_sentiment": "VERY_BULLISH",
-        "pre_spike_signals": 3,
-        "repeat_gainer": True,
-        "repeat_gainer_spikes": 4
+    test_v7_data = {
+        "pre_halt_state": "NORMAL",
+        "context_mrp": 72,
+        "context_ep": 68,
+        "context_active": True,
+        "block_reasons": [],
+        "risk_flags": {"dilution_risk": "LOW", "compliance_risk": "LOW"}
     }
 
-    send_signal_alert(test_signal, v6_data=test_v6_data)
+    send_signal_alert(test_signal, v7_data=test_v7_data)
+
+    # Test blocked signal
+    test_blocked = {
+        "ticker": "BLOCKED_TEST",
+        "signal": "BUY (BLOCKED)",
+        "monster_score": 0.72,
+        "notes": "BLOCKED: DAILY_TRADE_LIMIT"
+    }
+
+    send_signal_alert(test_blocked)
+
     print("Test alerts sent!")

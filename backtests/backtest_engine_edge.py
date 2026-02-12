@@ -1,3 +1,19 @@
+"""
+GV2-EDGE V7.0 — Backtest Engine
+================================
+
+Backtest engine for validating signal performance.
+
+Supports both legacy (signal_engine) and V7.0 (SignalProducer) architectures.
+Set USE_V7_ARCHITECTURE=True in config.py to use V7 backtesting.
+
+Metrics:
+- Win rate, average win/loss
+- Max drawdown, Sharpe ratio
+- Hit rate vs real top gainers
+- Lead time analysis
+"""
+
 import os
 import json
 import time
@@ -18,7 +34,8 @@ from config import (
     FINNHUB_API_KEY,
     BACKTEST_LOOKBACK_DAYS,
     SLIPPAGE_PCT,
-    CAPITAL_INITIAL
+    CAPITAL_INITIAL,
+    USE_V7_ARCHITECTURE
 )
 
 logger = get_logger("BACKTEST_EDGE")
