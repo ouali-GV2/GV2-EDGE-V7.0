@@ -15,14 +15,12 @@ from typing import Dict, List, Optional
 
 from utils.logger import get_logger
 from utils.time_utils import is_premarket, is_market_open, is_market_closed, is_after_hours
-from utils.api_guard import api_safe_call
-
 from src.universe_loader import load_universe
 from src.signal_logger import log_signal
 from src.watch_list import get_watch_list, get_watch_upgrades
 
 from alerts.telegram_alerts import send_signal_alert
-from monitoring.system_guardian import run_system_guardian
+from monitoring.system_guardian import run_guardian
 from weekly_deep_audit import run_weekly_audit_v2
 from src.afterhours_scanner import run_afterhours_scanner
 from daily_audit import run_daily_audit
@@ -509,14 +507,7 @@ def edge_cycle_v7():
                 logger.error(f"V7 error on {ticker}: {e}", exc_info=True)
 
     # Run async processing
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            asyncio.ensure_future(process_all())
-        else:
-            loop.run_until_complete(process_all())
-    except RuntimeError:
-        asyncio.run(process_all())
+    asyncio.run(process_all())
 
     # Log cycle summary
     producer_stats = state.producer.get_stats()
@@ -901,7 +892,7 @@ def run_edge():
 # ============================
 
 def start_guardian():
-    run_system_guardian()
+    run_guardian()
 
 
 # ============================

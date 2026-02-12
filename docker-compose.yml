@@ -12,11 +12,12 @@ services:
     volumes:
       - ./data:/app/data
 
+    env_file:
+      - .env
+
     environment:
       - TZ=UTC
 
-    # Limite légère (optionnel mais safe sur CX33)
-    deploy:
-      resources:
-        limits:
-          memory: 6g
+    # Limite mémoire compatible docker compose standard (CX33: 8Go)
+    mem_limit: 4g
+    mem_reservation: 2g

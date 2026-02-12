@@ -324,12 +324,20 @@ def load_universe(force_refresh=False):
     except Exception as e:
         logger.error(f"Universe build failed: {e}", exc_info=True)
 
-        # Fallback to saved CSV
+        # Fallback to saved CSV (only if it has data rows)
         if os.path.exists("data/universe.csv"):
-            logger.warning("Loading universe from fallback CSV")
-            return pd.read_csv("data/universe.csv")
+            try:
+                fallback = pd.read_csv("data/universe.csv")
+                if not fallback.empty and "ticker" in fallback.columns and len(fallback) > 0:
+                    logger.warning(f"Loading universe from fallback CSV ({len(fallback)} tickers)")
+                    return fallback
+                else:
+                    logger.warning("Fallback CSV is empty or malformed, skipping")
+            except Exception as csv_err:
+                logger.warning(f"Fallback CSV read failed: {csv_err}")
 
-        raise RuntimeError("No universe available")
+        logger.error("No universe available - will retry next cycle")
+        return pd.DataFrame(columns=["ticker", "market_cap", "price", "volume", "shares_outstanding", "name"])
 
 
 # ============================

@@ -29,14 +29,19 @@ RUN pip install --no-cache-dir --upgrade pip \
 # Copier tout le projet
 COPY . .
 
-# Créer dossiers data s’ils n’existent pas
+# Créer dossiers data s'ils n'existent pas
 RUN mkdir -p data/prices_cache \
     data/features_cache \
     data/backtest_reports \
-    data/audit_reports
+    data/audit_reports \
+    data/logs
+
+# Rendre l'entrypoint exécutable
+COPY entrypoint.sh .
+RUN chmod +x entrypoint.sh
 
 # Port Streamlit
 EXPOSE 8501
 
-# Lancement par défaut (dashboard)
-CMD ["streamlit", "run", "dashboards/streamlit_dashboard.py", "--server.port=8501", "--server.address=0.0.0.0"]
+# Lancement: trading engine + dashboard
+CMD ["./entrypoint.sh"]

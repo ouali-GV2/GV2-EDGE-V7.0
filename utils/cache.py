@@ -8,15 +8,18 @@ class TTLCache:
     Ultra fast + perfect for API responses & features
     """
 
-    def __init__(self, default_ttl=300):
+    def __init__(self, default_ttl=300, auto_cleanup_interval=300):
         self.default_ttl = default_ttl
         self._store = {}
         self._lock = threading.Lock()
+        self._last_cleanup = time.time()
+        self._cleanup_interval = auto_cleanup_interval
 
     def set(self, key, value, ttl=None):
         expire_at = time.time() + (ttl or self.default_ttl)
         with self._lock:
             self._store[key] = (value, expire_at)
+        self._maybe_cleanup()
 
     def get(self, key):
         with self._lock:
@@ -41,6 +44,14 @@ class TTLCache:
     def clear(self):
         with self._lock:
             self._store.clear()
+
+    def _maybe_cleanup(self):
+        """Auto-cleanup expired items periodically"""
+        now = time.time()
+        if now - self._last_cleanup < self._cleanup_interval:
+            return
+        self._last_cleanup = now
+        self.cleanup()
 
     def cleanup(self):
         """Remove expired items"""

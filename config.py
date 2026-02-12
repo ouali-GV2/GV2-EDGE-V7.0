@@ -12,7 +12,9 @@ FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "")
 # ========= IBKR CONNECTION =========
 
 # Use IBKR for real-time market data (Level 1)
-USE_IBKR_DATA = True  # Set to False to use Finnhub instead
+# Set to True only if IB Gateway/TWS is running (requires GUI or xvfb)
+# On headless servers (Hetzner CX33, etc.), set to False to use Finnhub
+USE_IBKR_DATA = os.getenv("USE_IBKR_DATA", "False").lower() in ("true", "1", "yes")
 
 IBKR_HOST = os.getenv("IBKR_HOST", "127.0.0.1")
 IBKR_PORT = int(os.getenv("IBKR_PORT", "7497"))   # 7497 = paper trading, 7496 = live, 4001/4002 = Gateway
