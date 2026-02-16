@@ -800,6 +800,59 @@ Level: *{trigger_level}*
 
 
 # ============================
+# IBKR Connection Alert (V7.1)
+# ============================
+
+def send_ibkr_connection_alert(status: str, details: dict = None):
+    """
+    Send IBKR connection status alert.
+
+    Args:
+        status: "disconnected", "reconnected", "failed"
+        details: Optional dict with downtime_seconds, reconnections, etc.
+    """
+    details = details or {}
+
+    if status == "disconnected":
+        msg = (
+            "\U0001F50C *IBKR DISCONNECTED*\n\n"
+            "Connection lost. Attempting automatic reconnection...\n"
+            "\U000023F3 Backoff: 0s, 2s, 5s, 15s, 30s (5 attempts max)"
+        )
+
+    elif status == "reconnected":
+        downtime = details.get("downtime_seconds", 0)
+        total_reconnections = details.get("reconnections", 0)
+
+        if downtime < 60:
+            downtime_str = f"{downtime:.0f}s"
+        else:
+            downtime_str = f"{downtime / 60:.1f}min"
+
+        msg = (
+            f"\U00002705 *IBKR RECONNECTED*\n\n"
+            f"\U000023F1 Downtime: `{downtime_str}`\n"
+            f"\U0001F504 Total reconnections: `{total_reconnections}`\n\n"
+            f"Data feed restored."
+        )
+
+    elif status == "failed":
+        total_disconnections = details.get("disconnections", 0)
+        msg = (
+            f"\U0001F6A8 *IBKR CONNECTION FAILED*\n\n"
+            f"5 reconnection attempts exhausted.\n"
+            f"\U0001F504 Total disconnections: `{total_disconnections}`\n\n"
+            f"\U000026A0 *Fallback: Finnhub data active*\n"
+            f"Manual intervention may be required."
+        )
+
+    else:
+        msg = f"\U0001F50C *IBKR {status.upper()}*"
+
+    send_message(msg)
+
+
+# ============================
 # Test Connection
 # ============================
 
