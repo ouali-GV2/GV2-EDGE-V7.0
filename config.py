@@ -462,3 +462,20 @@ RADAR_SCAN_INTERVAL = 5               # Seconds between scans (fast: buffer read
 # Risk Guard V8 overrides
 RISK_APPLY_COMBINED_MULTIPLIERS = False  # V8: Use MIN mode (not multiplicative)
 RISK_ENABLE_MOMENTUM_OVERRIDE = True     # V8: Allow momentum to reduce risk penalties
+
+# ============================
+# V9: MULTI-RADAR ENGINE
+# ============================
+
+ENABLE_MULTI_RADAR = True                 # Enable V9 multi-radar detection (4 radars paralleles)
+
+# Seuils de signal confluence
+MULTI_RADAR_BUY_STRONG_THRESHOLD = 0.75   # Score confluence minimum pour BUY_STRONG
+MULTI_RADAR_BUY_THRESHOLD = 0.55          # Score confluence minimum pour BUY
+MULTI_RADAR_WATCH_THRESHOLD = 0.35        # Score confluence minimum pour WATCH
+MULTI_RADAR_EARLY_THRESHOLD = 0.20        # Score confluence minimum pour EARLY_SIGNAL
+
+# Bonus de confluence (recompense l'accord entre radars)
+MULTI_RADAR_UNANIMOUS_BONUS = 0.15        # 4/4 radars actifs
+MULTI_RADAR_STRONG_BONUS = 0.10           # 3/4 radars actifs
+MULTI_RADAR_MODERATE_BONUS = 0.05         # 2/4 radars actifs
