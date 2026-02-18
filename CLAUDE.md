@@ -1,7 +1,7 @@
 # GV2-EDGE — System Reference & Development Guide
 
-> **Version** : V8.0 (Architecture V7.0 + Acceleration Engine V8)
-> **Derniere mise a jour** : 2026-02-17
+> **Version** : V9.0 (Architecture V7.0 + Acceleration V8 + Multi-Radar V9)
+> **Derniere mise a jour** : 2026-02-18
 > **Deploiement** : Hetzner CX43 (8 vCPU, 16 Go RAM, 160 Go SSD, headless Linux) + IBKR Gateway
 > **Langage** : Python 3.11+ (asyncio + threading)
 
@@ -93,6 +93,66 @@ Pour chaque ticker dans l'univers:
   10. handle_signal_result()              → Log + Telegram + Market Memory
 ```
 
+### 2.4 Multi-Radar Engine V9 (`src/engines/multi_radar_engine.py`)
+
+Architecture de detection multi-angle : 4 radars independants tournent **en parallele** (`asyncio.gather`) pour chaque ticker, chacun s'adapte a la session en cours.
+
+```
+               SessionAdapter (6 sous-sessions)
+                       │
+    ┌──────────────────┼─────────────────────────────┐
+    │                  │               │              │
+ FLOW RADAR     CATALYST RADAR   SMART MONEY    SENTIMENT
+ (quantitatif)  (fondamental)    (options+ins)  (social+NLP)
+    │                  │               │              │
+    │  asyncio.gather — les 4 tournent simultanement  │
+    └──────────────────┼─────────────────────────────┘
+                       │
+               CONFLUENCE MATRIX (matrice 2D + modifiers)
+                       │
+               ConfluenceSignal → signal_type + agreement + lead_radar
+```
+
+**Les 4 Radars :**
+
+| Radar | Sources (modules existants) | Ce qu'il detecte | Performance |
+|-------|---------------------------|-------------------|-------------|
+| **FLOW** | AccelerationEngine, TickerStateBuffer, SmallCapRadar, FeatureEngine | Accumulation volume, derivees, breakout readiness | <10ms (buffer reads) |
+| **CATALYST** | EventHub, CatalystScorerV3, AnticipationEngine, FDA Calendar | Catalysts, news, SEC filings | <50ms (cache reads) |
+| **SMART MONEY** | Options Flow IBKR (OPRA), InsiderBoost (SEC Form 4), Extended Hours | Options inhabituelles, achats insiders | <100ms |
+| **SENTIMENT** | Social Buzz (Reddit+StockTwits), NLP Enrichi (Grok), Repeat Gainer Memory | Buzz social, sentiment, repeat runners | <200ms |
+
+**Adaptation par session :**
+
+| Sous-session | Flow | Catalyst | Smart Money | Sentiment | Logique |
+|-------------|------|----------|-------------|-----------|---------|
+| AFTER_HOURS (16-20h) | 15% LOW | **45% ULTRA** | 10% LOW | 30% HIGH | News dominant, flow limite |
+| PRE_MARKET (04-09:30) | 30% HIGH | 30% HIGH | 15% MED | 25% HIGH | Equilibre gap+catalyst |
+| RTH_OPEN (09:30-10:30) | **35% ULTRA** | 20% HIGH | **30% ULTRA** | 15% MED | Max flow+options |
+| RTH_MIDDAY (10:30-14:30) | **40% HIGH** | 20% MED | 25% HIGH | 15% LOW | Flow dominant |
+| RTH_CLOSE (14:30-16h) | 30% HIGH | 30% HIGH | 25% HIGH | 15% MED | Anticipation lendemain |
+| CLOSED/WEEKEND | 5% LOW | **50% HIGH** | 5% LOW | **40% HIGH** | Scanning batch |
+
+**Confluence Matrix :**
+
+```
+                    Catalyst Level
+                    HIGH (>=0.6)    MEDIUM (0.3-0.6)   LOW (<0.3)
+Flow    HIGH        BUY_STRONG      BUY                WATCH
+Level   MEDIUM      BUY             WATCH              EARLY_SIGNAL
+        LOW         WATCH           EARLY_SIGNAL       NO_SIGNAL
+
+Modifiers:
+  Smart Money HIGH → upgrade +1 niveau
+  Sentiment HIGH + 2+ radars actifs → upgrade +1 niveau
+  4/4 radars actifs (UNANIMOUS) → +0.15 bonus, minimum BUY si score > 0.50
+  3/4 radars actifs (STRONG) → +0.10 bonus
+  2/4 radars actifs (MODERATE) → +0.05 bonus
+```
+
+**Singleton :** `get_multi_radar_engine()`
+**Config :** `ENABLE_MULTI_RADAR = True` dans `config.py`
+
 ---
 
 ## 3. MODULES
@@ -139,13 +199,14 @@ GV2-EDGE-V7.0/
 │   ├── top_gainers_source.py           # [C8] Source externe top gainers (IBKR + Yahoo)
 │   └── ibkr_streaming.py              # [V9] Streaming temps reel IBKR (event-driven, ~10ms)
 │
-│   ├── engines/                         # Moteurs V7/V8 (coeur du systeme)
+│   ├── engines/                         # Moteurs V7/V8/V9 (coeur du systeme)
 │   │   ├── signal_producer.py           # LAYER 1: Detection illimitee V8
 │   │   ├── order_computer.py            # LAYER 2: Calcul ordres systematique
 │   │   ├── execution_gate.py            # LAYER 3: Gate execution (9 checks)
 │   │   ├── acceleration_engine.py       # V8: Derivees + z-scores (anticipation)
 │   │   ├── smallcap_radar.py            # V8: Radar small-cap (ACCUMULATING → BREAKOUT)
-│   │   └── ticker_state_buffer.py       # V8: Ring buffer (120 snapshots/ticker)
+│   │   ├── ticker_state_buffer.py       # V8: Ring buffer (120 snapshots/ticker)
+│   │   └── multi_radar_engine.py        # [V9] 4 radars paralleles + confluence matrix
 │   │
 │   ├── scoring/                         # Systeme de scoring
 │   │   ├── monster_score.py             # Monster Score V4 (9 composants)
@@ -568,7 +629,8 @@ Triggers pour devenir HOT :
 - **Detection JAMAIS bloquee** — seule l'execution a des limites
 - **Additif, pas multiplicatif** — les boosts s'ajoutent, les penalites utilisent MIN
 - **Fallback systematique** — IBKR → Finnhub → Cache → Default
-- **Singleton pattern** — `get_ibkr()`, `get_ibkr_streaming()`, `get_signal_producer()`
+- **Singleton pattern** — `get_ibkr()`, `get_ibkr_streaming()`, `get_signal_producer()`, `get_multi_radar_engine()`
+- **Multi-Radar V9** — 4 radars paralleles (asyncio.gather), confluence matrix, session-adaptatif
 - **Async + Thread-safe** — asyncio pour I/O, threading pour background
 
 ### 11.2 Sources de donnees
@@ -583,6 +645,7 @@ Triggers pour devenir HOT :
 - **Monster Score** : composant ponderes normalises 0-1 + boosts additifs
 - **Catalyst Score** : 5 tiers x 18 types + recency decay + quality + confluence
 - **Signal Producer** : score ajuste + boosts V8 (acceleration, pre-spike, repeat gainer)
+- **Multi-Radar V9** : 4 scores independants → confluence matrix → signal final (plus robuste que score unique)
 
 ### 11.4 Risk
 
@@ -632,4 +695,11 @@ Triggers pour devenir HOT :
 | **Gap Zone** | Classification gap : NEGLIGIBLE / EXPLOITABLE / EXTENDED / OVEREXTENDED |
 | **RTH** | Regular Trading Hours (09:30-16:00 ET) |
 | **IBKR Streaming** | V9 — streaming temps reel event-driven (~10ms latence) |
+| **Multi-Radar Engine** | V9 — 4 radars paralleles (Flow, Catalyst, Smart Money, Sentiment) + Confluence Matrix |
+| **Flow Radar** | V9 — radar quantitatif (AccelerationEngine + Buffer + SmallCapRadar) |
+| **Catalyst Radar** | V9 — radar fondamental (EventHub + CatalystV3 + AnticipationEngine + FDA) |
+| **Smart Money Radar** | V9 — radar options + insiders (OPRA + SEC Form 4) |
+| **Sentiment Radar** | V9 — radar social (Reddit + StockTwits + NLP Grok + Repeat Gainers) |
+| **Confluence Matrix** | V9 — matrice 2D (Flow x Catalyst) + modifiers (Smart Money + Sentiment) |
+| **Session Adapter** | V9 — adapte poids et sensibilites des radars par sous-session (6 modes) |
 | **PDUFA** | Prescription Drug User Fee Act — date limite decision FDA |
