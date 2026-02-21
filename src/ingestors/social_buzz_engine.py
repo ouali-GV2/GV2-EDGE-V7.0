@@ -1,28 +1,23 @@
 """
-SOCIAL BUZZ ENGINE V6.1
-=======================
+SOCIAL BUZZ ENGINE V6.1 — PARTIALLY DEPRECATED (V9)
+=====================================================
 
-Mesure du buzz social SANS Twitter/X API.
+The raw mention counting in this module is supplemented by
+src.social_velocity.SocialVelocityEngine (V9) which measures
+acceleration of mentions (1st/2nd derivatives) for earlier detection.
+
+This module remains active for data ingestion (Reddit + StockTwits fetch).
+SocialVelocityEngine consumes its data for velocity computation.
 
 Sources:
 - Reddit (PRAW API - FREE)
 - StockTwits (FREE tier: 200 req/hour)
 
-Métriques (statistiques simples, pas de ML lourd):
+Métriques:
 - mention_count: nombre de mentions récentes
 - acceleration: delta vs baseline 24h
 - source_diversity: nombre de sources différentes
 - sentiment_ratio: bullish/bearish ratio
-
-Rôle:
-- Détecter HYPE avant explosion
-- Trigger pour hot_ticker_queue si acceleration > 3x
-- Boost léger pour Monster Score
-
-Architecture:
-- Baseline tracking via SQLite (avg 7 jours)
-- Parallel fetch Reddit + StockTwits
-- Score composite 0-1
 """
 
 import os

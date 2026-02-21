@@ -1,20 +1,20 @@
 """
-SOCIAL BUZZ TRACKER
-===================
+SOCIAL BUZZ TRACKER - DEPRECATED (V9)
+========================================
 
-Track social mention volume (not sentiment, just buzz level)
+DEPRECATED: Use src.social_velocity.SocialVelocityEngine instead.
 
-Sources:
+SocialVelocityEngine measures acceleration of mentions (1st/2nd derivatives)
+rather than raw mention counts, providing much earlier detection.
+
+This module is kept for backward compatibility only.
+For new code, use: from src.social_velocity import SocialVelocityEngine
+
+Original sources:
 1. Twitter/X via Grok API (mention count)
-2. Reddit WallStreetBets scraping (post count)  
+2. Reddit WallStreetBets scraping (post count)
 3. StockTwits API (message volume)
 4. Google Trends (search interest)
-
-Goal: Detect abnormal buzz BEFORE news breaks
-(Insiders/smart money often discuss before public)
-
-Scoring: Compare current buzz to 30-day average
-Spike >3x = signal
 """
 
 from datetime import datetime, timedelta

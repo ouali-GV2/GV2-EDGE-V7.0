@@ -1,18 +1,44 @@
+"""
+ENSEMBLE ENGINE - DEPRECATED (V9)
+==================================
+
+This module is DEPRECATED since V9.0.
+Use src.engines.multi_radar_engine.MultiRadarEngine (Confluence Matrix) instead.
+
+Kept for backward compatibility with legacy edge_cycle() in main.py.
+"""
+
+import warnings
 from utils.logger import get_logger
 
 logger = get_logger("ENSEMBLE_ENGINE")
 
+_DEPRECATION_WARNED = False
+
+
+def _warn_deprecated():
+    global _DEPRECATION_WARNED
+    if not _DEPRECATION_WARNED:
+        warnings.warn(
+            "ensemble_engine is deprecated since V9.0. "
+            "Use src.engines.multi_radar_engine.MultiRadarEngine instead.",
+            DeprecationWarning,
+            stacklevel=3
+        )
+        logger.warning("DEPRECATED: ensemble_engine.py - use MultiRadarEngine (V9+)")
+        _DEPRECATION_WARNED = True
+
 
 # ============================
-# Soft confluence logic
+# Soft confluence logic (DEPRECATED)
 # ============================
 
 def apply_confluence(signal):
     """
-    Soft ensemble:
-    doesn't block signals
-    only boosts or soft reduces confidence
+    DEPRECATED: Use MultiRadarEngine.scan_ticker() instead.
+    Soft ensemble: doesn't block signals, only boosts or soft reduces confidence.
     """
+    _warn_deprecated()
 
     score = signal["monster_score"]
     components = signal.get("components", {})

@@ -112,7 +112,8 @@ from src.ibkr_connector import get_ibkr
 # IBKR Streaming V9 (event-driven, ~10ms latency)
 from src.ibkr_streaming import get_ibkr_streaming, start_ibkr_streaming
 
-# Legacy imports (fallback)
+# Legacy imports (DEPRECATED - only used by edge_cycle() fallback when USE_V7_ARCHITECTURE=False)
+# V9: Use SignalProducer + OrderComputer + MultiRadarEngine instead
 from src.signal_engine import generate_signal
 from src.portfolio_engine import process_signal
 
