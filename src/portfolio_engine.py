@@ -1,3 +1,15 @@
+"""
+PORTFOLIO ENGINE - DEPRECATED (V8)
+====================================
+
+This module is DEPRECATED since V8.0.
+Use src.engines.order_computer.OrderComputer for position sizing instead.
+
+Kept for backward compatibility with legacy edge_cycle() in main.py
+and backtests/backtest_engine_edge.py.
+"""
+
+import warnings
 from utils.logger import get_logger
 from utils.api_guard import safe_get
 from utils.time_utils import market_session
@@ -11,6 +23,21 @@ from config import (
 )
 
 logger = get_logger("PORTFOLIO_ENGINE")
+
+_DEPRECATION_WARNED = False
+
+
+def _warn_deprecated():
+    global _DEPRECATION_WARNED
+    if not _DEPRECATION_WARNED:
+        warnings.warn(
+            "portfolio_engine is deprecated since V8.0. "
+            "Use src.engines.order_computer.OrderComputer instead.",
+            DeprecationWarning,
+            stacklevel=3
+        )
+        logger.warning("DEPRECATED: portfolio_engine.py - use OrderComputer (V8+)")
+        _DEPRECATION_WARNED = True
 
 FINNHUB_QUOTE = "https://finnhub.io/api/v1/quote"
 
@@ -61,9 +88,8 @@ def estimate_atr(features, price=None):
 # ============================
 
 def compute_position(signal, features, capital=None):
-    """
-    Calcule la taille de position basée sur le signal et le risque
-    """
+    """DEPRECATED: Use OrderComputer.compute_order() instead."""
+    _warn_deprecated()
     if capital is None:
         capital = MANUAL_CAPITAL
     
@@ -126,16 +152,8 @@ def update_trailing_stop(position, new_price):
 # ============================
 
 def process_signal(signal, capital=None):
-    """
-    Traite un signal de trading et retourne un plan de trade
-    
-    Args:
-        signal: Dict contenant le signal (de signal_engine)
-        capital: Capital disponible (optionnel, utilise MANUAL_CAPITAL par défaut)
-    
-    Returns:
-        Dict avec le plan de trade ou None si impossible
-    """
+    """DEPRECATED: Use OrderComputer.compute_order() instead."""
+    _warn_deprecated()
     from src.feature_engine import compute_features
     
     ticker = signal["ticker"]

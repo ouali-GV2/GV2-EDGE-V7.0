@@ -1,8 +1,14 @@
 """
-SIGNAL PRODUCER V7.0
+SIGNAL PRODUCER V8.0
 ====================
 
-Moteur de détection ILLIMITÉ.
+Moteur de détection ILLIMITÉ - Enhanced with Anticipatory Detection.
+
+V8 ENHANCEMENTS:
+- NEW: AccelerationState integration (ACCUMULATING/LAUNCHING/BREAKOUT)
+- NEW: Acceleration boost from V8 derivatives (velocity + z-scores)
+- CHANGED: Pre-Spike boost now considers acceleration state
+- CHANGED: EARLY_SIGNAL now triggered by ACCUMULATING state (earliest detection)
 
 Principe fondamental:
 - Produit des signaux 24/7
@@ -10,13 +16,15 @@ Principe fondamental:
 - AUCUN blocage basé sur les contraintes d'exécution
 - Le moteur "pense" toujours, l'exécution "décide" ensuite
 
-Ce module est la COUCHE 1 de l'architecture V7:
-1. SIGNAL PRODUCER (ici) → Détection pure
+Ce module est la COUCHE 1 de l'architecture V8:
+1. SIGNAL PRODUCER (ici) → Détection pure (with V8 acceleration)
 2. ORDER COMPUTER → Calcul d'ordres
 3. EXECUTION GATE → Limites et autorisations
 
 Sources de signaux:
-- Monster Score (Catalyst Score V3)
+- Monster Score V4 (with acceleration component)
+- AccelerationEngine V8 (derivatives + z-scores)
+- SmallCapRadar V8 (anticipatory detection)
 - Pre-Spike Radar
 - Event Hub
 - Social Buzz
@@ -112,6 +120,13 @@ class DetectionInput:
     volume_ratio: float = 1.0        # Current vs average
     price_change_pct: float = 0.0
     market_session: str = "RTH"
+
+    # V8: Acceleration Engine data
+    acceleration_state: str = "DORMANT"     # DORMANT/ACCUMULATING/LAUNCHING/BREAKOUT/EXHAUSTED
+    acceleration_score: float = 0.0         # 0-1 composite acceleration score
+    volume_zscore: float = 0.0              # Volume z-score vs 20-day baseline
+    accumulation_score: float = 0.0         # 0-1 accumulation detection
+    breakout_readiness: float = 0.0         # 0-1 how close to breakout
 
 
 @dataclass
@@ -282,6 +297,29 @@ class SignalProducer:
             score += vol_boost
             reasons.append(f"Volume {input_data.volume_ratio:.1f}x: {vol_boost:+.2f}")
 
+        # V8: Acceleration state boost (derivative-based anticipation)
+        if input_data.acceleration_state == "ACCUMULATING":
+            accel_boost = min(0.08, 0.03 + input_data.accumulation_score * 0.05)
+            score += accel_boost
+            reasons.append(f"V8 Accumulating (score={input_data.accumulation_score:.2f}): {accel_boost:+.2f}")
+        elif input_data.acceleration_state == "LAUNCHING":
+            accel_boost = min(0.12, 0.06 + input_data.breakout_readiness * 0.06)
+            score += accel_boost
+            reasons.append(f"V8 Launching (readiness={input_data.breakout_readiness:.2f}): {accel_boost:+.2f}")
+        elif input_data.acceleration_state == "BREAKOUT":
+            accel_boost = min(0.15, 0.08 + input_data.acceleration_score * 0.07)
+            score += accel_boost
+            reasons.append(f"V8 Breakout (accel={input_data.acceleration_score:.2f}): {accel_boost:+.2f}")
+        elif input_data.acceleration_state == "EXHAUSTED":
+            score -= 0.05
+            reasons.append("V8 Exhausted: -0.05")
+
+        # V8: Volume z-score bonus (anomaly detection replaces absolute thresholds)
+        if input_data.volume_zscore > 2.5:
+            z_boost = min(0.06, (input_data.volume_zscore - 2.0) * 0.03)
+            score += z_boost
+            reasons.append(f"V8 Volume z={input_data.volume_zscore:.1f}: {z_boost:+.2f}")
+
         # Cap score at 1.0
         score = min(1.0, max(0.0, score))
 
@@ -292,11 +330,24 @@ class SignalProducer:
         adjusted_score: float,
         input_data: DetectionInput
     ) -> SignalType:
-        """Determine signal type based on adjusted score"""
+        """
+        Determine signal type based on adjusted score.
+
+        V8: ACCUMULATING/LAUNCHING states can elevate signal type for
+        earlier detection of potential top gainers.
+        """
+
+        # V8: BREAKOUT state = immediate BUY_STRONG if score supports it
+        if input_data.acceleration_state == "BREAKOUT":
+            if adjusted_score >= self.thresholds["BUY"] * 0.85:
+                return SignalType.BUY_STRONG
 
         # Special case: LAUNCHING pre-spike can elevate signal
-        if input_data.pre_spike_state == PreSpikeState.LAUNCHING:
-            if adjusted_score >= self.thresholds["BUY"] * 0.9:  # Slightly lower threshold
+        if (
+            input_data.pre_spike_state == PreSpikeState.LAUNCHING
+            or input_data.acceleration_state == "LAUNCHING"
+        ):
+            if adjusted_score >= self.thresholds["BUY"] * 0.9:
                 return SignalType.BUY_STRONG
 
         # Standard thresholds
@@ -310,9 +361,27 @@ class SignalProducer:
             return SignalType.WATCH
 
         if adjusted_score >= self.thresholds["EARLY_SIGNAL"]:
-            # Only EARLY_SIGNAL if there's some catalyst indication
             if input_data.catalyst_type or input_data.pre_spike_state != PreSpikeState.DORMANT:
                 return SignalType.EARLY_SIGNAL
+
+        # V8: ACCUMULATING state can trigger EARLY_SIGNAL even below threshold
+        # This is the KEY V8 innovation: detecting stocks BEFORE the move
+        if (
+            input_data.acceleration_state == "ACCUMULATING"
+            and input_data.accumulation_score >= 0.4
+            and adjusted_score >= self.thresholds["EARLY_SIGNAL"] * 0.85
+        ):
+            return SignalType.EARLY_SIGNAL
+
+        # C3 FIX: Adaptive score floor for high volume z-score
+        # Problem P3: tickers with volume z > 2.5 but no catalyst get NO_SIGNAL
+        # even though abnormal volume alone is a strong precursor signal.
+        # If volume z-score > 2.5, allow EARLY_SIGNAL even without catalyst.
+        if (
+            input_data.volume_zscore > 2.5
+            and adjusted_score >= self.thresholds["EARLY_SIGNAL"] * 0.80
+        ):
+            return SignalType.EARLY_SIGNAL
 
         return SignalType.NO_SIGNAL
 
@@ -350,6 +419,16 @@ class SignalProducer:
         if input_data.is_repeat_gainer:
             confidence += 0.10
 
+        # V8: Acceleration state confirmation
+        if input_data.acceleration_state in ("LAUNCHING", "BREAKOUT"):
+            confidence += 0.10
+        elif input_data.acceleration_state == "ACCUMULATING":
+            confidence += 0.05
+
+        # V8: Volume z-score anomaly confirmation
+        if input_data.volume_zscore > 2.0:
+            confidence += 0.05
+
         return min(1.0, max(0.0, confidence))
 
     def _build_unified_signal(
@@ -371,6 +450,15 @@ class SignalProducer:
             badges.append("📈 Social Buzz")
         if input_data.catalyst_type:
             badges.append(f"⚡ {input_data.catalyst_type}")
+        # V8: Acceleration state badges
+        if input_data.acceleration_state == "ACCUMULATING":
+            badges.append("🔍 Accumulating")
+        elif input_data.acceleration_state == "LAUNCHING":
+            badges.append("🚀 V8 Launch")
+        elif input_data.acceleration_state == "BREAKOUT":
+            badges.append("💥 Breakout")
+        if input_data.volume_zscore > 2.5:
+            badges.append(f"📊 Vol z={input_data.volume_zscore:.1f}")
 
         return UnifiedSignal(
             id=signal_id,

@@ -1,9 +1,9 @@
-# GV2-EDGE V7.0 - Developer Documentation
+# GV2-EDGE V9.0 - Developer Documentation
 
 ## Objectif
 
 Ce document explique:
-- L'architecture technique V7.0 (Detection/Execution Separation)
+- L'architecture technique V9.0 (V7 Detection/Execution + V8 Acceleration + V9 Multi-Radar)
 - Le role de chaque module
 - Les flux de donnees et le scoring
 - Comment etendre le systeme
@@ -56,9 +56,13 @@ signal = gate.evaluate(signal, risk_flags)
 ```
 engines/
 ├── __init__.py
-├── signal_producer.py    # Layer 1: Detection
-├── order_computer.py     # Layer 2: Order calculation
-└── execution_gate.py     # Layer 3: Limits
+├── signal_producer.py        # Layer 1: Detection V8
+├── order_computer.py         # Layer 2: Order calculation
+├── execution_gate.py         # Layer 3: Limits
+├── acceleration_engine.py    # V8: Derivees, z-scores
+├── ticker_state_buffer.py    # V8: Ring buffer 120pts
+├── smallcap_radar.py         # V8: Radar anticipatif (4 phases)
+└── multi_radar_engine.py     # V9: 4 radars paralleles + confluence
 ```
 
 #### signal_producer.py
@@ -126,6 +130,37 @@ class ExecutionGate:
         decision = self._evaluate_limits(signal, risk_flags)
         signal.execution = decision
         return signal
+```
+
+### V9 Modules
+
+#### multi_radar_engine.py (V9)
+
+```python
+class MultiRadarEngine:
+    """4 radars paralleles avec confluence matrix, session-adaptatif"""
+
+    async def scan(self, ticker, session) -> ConfluenceSignal:
+        # 4 radars en parallele via asyncio.gather
+        flow, catalyst, smart_money, sentiment = await asyncio.gather(
+            self.flow_radar.scan(ticker),
+            self.catalyst_radar.scan(ticker),
+            self.smart_money_radar.scan(ticker),
+            self.sentiment_radar.scan(ticker),
+        )
+        return self.confluence_matrix.evaluate(flow, catalyst, smart_money, sentiment)
+```
+
+#### ibkr_streaming.py (V9)
+
+```python
+class IBKRStreamingEngine:
+    """Streaming temps reel event-driven (~10ms latence)"""
+
+    # Remplace poll-and-cancel (2s) par pendingTickersEvent callback
+    # Subscriptions persistantes (max 200 concurrentes)
+    # Auto-detection: VOLUME_SPIKE, PRICE_SURGE, SPREAD_TIGHTENING
+    # Feed automatique TickerStateBuffer + HotTickerQueue
 ```
 
 ### src/models/signal_types.py - Data Models
@@ -338,6 +373,12 @@ python -c "from src.market_memory import is_market_memory_stable; print(is_marke
 
 # Test full pipeline
 python tests/test_pipeline.py
+
+# Test V9 Multi-Radar
+python -c "from src.engines.multi_radar_engine import get_multi_radar_engine; print('MultiRadar OK')"
+
+# Test IBKR Streaming
+python -c "from src.ibkr_streaming import get_ibkr_streaming; print('Streaming OK')"
 ```
 
 ---
@@ -357,6 +398,9 @@ python tests/test_pipeline.py
 - Seul ExecutionGate peut bloquer
 - Raisons de blocage TOUJOURS visibles
 - Signaux bloques alimentent Market Memory
+- Multi-Radar V9 : 4 radars paralleles, confluence matrix, session-adaptatif
+- IBKR Streaming V9 : event-driven, fallback automatique vers poll mode
+- Detection jamais arretee, meme si un radar est indisponible
 
 ---
 
@@ -389,6 +433,14 @@ ENABLE_MARKET_MEMORY = True
 MARKET_MEMORY_MIN_MISSES = 50
 MARKET_MEMORY_MIN_TRADES = 30
 MARKET_MEMORY_MIN_PATTERNS = 10
+
+# V9.0 Multi-Radar
+ENABLE_MULTI_RADAR = True
+MULTI_RADAR_MIN_AGREEMENT = 2  # Minimum 2 radars actifs
+
+# V9.0 IBKR Streaming
+ENABLE_IBKR_STREAMING = True
+IBKR_MAX_SUBSCRIPTIONS = 200
 ```
 
 ---
@@ -404,5 +456,5 @@ MARKET_MEMORY_MIN_PATTERNS = 10
 
 ---
 
-**Version:** 7.0.0
-**Last Updated:** 2026-02-12
+**Version:** 9.0.0
+**Last Updated:** 2026-02-21

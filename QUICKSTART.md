@@ -1,4 +1,4 @@
-# GV2-EDGE V7.0 - Quick Start Guide
+# GV2-EDGE V9.0 - Quick Start Guide
 
 ## Installation en 5 Minutes
 
@@ -62,7 +62,7 @@ python main.py
 
 ---
 
-## Architecture V7.0
+## Architecture V9.0
 
 ```
 Detection (Layer 1) -> JAMAIS bloque
@@ -70,6 +70,10 @@ Detection (Layer 1) -> JAMAIS bloque
 Order (Layer 2) -> TOUJOURS calcule
      |
 Execution (Layer 3) -> Seul point de blocage
+     |
+Multi-Radar V9 -> 4 radars paralleles + confluence
+     |
+IBKR Streaming V9 -> Temps reel ~10ms
      |
 Output -> TOUS signaux visibles (avec raisons si bloques)
 ```
@@ -92,6 +96,12 @@ python -c "from src.risk_guard import get_unified_guard; print('RiskGuard OK')"
 
 # Test Market Memory
 python -c "from src.market_memory import is_market_memory_stable; print(is_market_memory_stable())"
+
+# Test V9 Multi-Radar
+python -c "from src.engines.multi_radar_engine import get_multi_radar_engine; print('MultiRadar OK')"
+
+# Test V9 IBKR Streaming
+python -c "from src.ibkr_streaming import get_ibkr_streaming; print('Streaming OK')"
 ```
 
 ---
@@ -106,7 +116,7 @@ python -c "from src.market_memory import is_market_memory_stable; print(is_marke
 
 ---
 
-## Configuration V7 (config.py)
+## Configuration V9 (config.py)
 
 ```python
 # V7.0 Architecture
@@ -124,6 +134,12 @@ ENABLE_RISK_GUARD = True        # Assessment risques
 
 # Market Memory
 ENABLE_MARKET_MEMORY = True     # MRP/EP (auto-activation)
+
+# V9.0 Multi-Radar
+ENABLE_MULTI_RADAR = True
+
+# V9.0 Streaming
+ENABLE_IBKR_STREAMING = True
 ```
 
 ---
@@ -139,7 +155,7 @@ ENABLE_MARKET_MEMORY = True     # MRP/EP (auto-activation)
 
 ---
 
-## Premiers Signaux V7
+## Premiers Signaux V9
 
 Attendez les alertes Telegram :
 
@@ -193,6 +209,6 @@ Affiche:
 
 ---
 
-**Happy Trading with V7.0!**
+**Happy Trading with V9.0!**
 
-*Detection JAMAIS bloquee. Execution controlee.*
+*Detection JAMAIS bloquee. Multi-Radar. Temps reel.*

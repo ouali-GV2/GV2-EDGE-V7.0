@@ -1,8 +1,8 @@
-# DEPLOYMENT GUIDE - GV2-EDGE V7.0
+# DEPLOYMENT GUIDE - GV2-EDGE V9.0
 
 Complete guide to install, configure, and deploy GV2-EDGE on a production server.
 
-**V7.0 Architecture**: Detection/Execution Separation with full transparency.
+**V9.0 Architecture**: Multi-Radar Detection + IBKR Streaming + Detection/Execution Separation
 
 ---
 
@@ -27,10 +27,10 @@ Complete guide to install, configure, and deploy GV2-EDGE on a production server
 | Component | Minimum | Recommended |
 |-----------|---------|-------------|
 | OS | Ubuntu 20.04 LTS | Ubuntu 22.04 LTS |
-| RAM | 4 GB | 8 GB |
-| CPU | 2 cores | 4 cores |
-| Storage | 20 GB SSD | 50 GB SSD |
-| Python | 3.8+ | 3.10+ |
+| RAM | 4 GB | 16 GB |
+| CPU | 2 cores | 8 cores |
+| Storage | 20 GB SSD | 160 GB SSD |
+| Python | 3.10+ | 3.11+ |
 
 ### Required Accounts & Subscriptions
 
@@ -54,8 +54,8 @@ Complete guide to install, configure, and deploy GV2-EDGE on a production server
 ### 2.1 Clone Repository
 
 ```bash
-git clone https://github.com/your-org/GV2-EDGE-V5.1.git
-cd GV2-EDGE-V5.1
+git clone https://github.com/your-org/GV2-EDGE-V9.0.git
+cd GV2-EDGE-V9.0
 ```
 
 ### 2.2 Create Virtual Environment
@@ -334,7 +334,7 @@ sudo su - gv2edge
 cd /home/gv2edge
 
 # Clone repository
-git clone https://github.com/your-org/GV2-EDGE-V5.1.git app
+git clone https://github.com/your-org/GV2-EDGE-V9.0.git app
 cd app
 
 # Setup venv
@@ -709,10 +709,10 @@ If hitting rate limits:
 
 ## Support
 
-- **Documentation:** See `README.md`, `README_DEV.md`, `README_TRADER.md`
+- **Documentation:** See `README.md`, `CLAUDE.md`, `README_TRADER.md`
 - **Issues:** Report bugs via GitHub Issues
 - **Logs:** Always include relevant log files when reporting issues
 
 ---
 
-*Last updated: 2026-02-12 - GV2-EDGE V7.0*
+*Last updated: 2026-02-21 - GV2-EDGE V9.0*

@@ -1,3 +1,14 @@
+"""
+PM SCANNER V8 - Pre-Market Scanner with Correct Gap Calculation
+================================================================
+
+V8 FIXES (from REVIEW):
+- P1 CRITICAL: Fixed gap_pct to use prev_close (overnight gap) instead of pm_open (intra-PM momentum)
+- Added gap classification: NEGLIGIBLE / EXPLOITABLE / EXTENDED / OVEREXTENDED
+- Sweet spot prioritization for 3-8% gaps (highest probability of continuation)
+- Separated intra-PM momentum from overnight gap for cleaner signals
+"""
+
 from utils.logger import get_logger
 from utils.api_guard import safe_get
 from utils.cache import Cache
@@ -10,6 +21,30 @@ from datetime import datetime
 logger = get_logger("PM_SCANNER")
 
 cache = Cache(ttl=30)
+
+# V8: Gap classification zones (sweet spot = EXPLOITABLE)
+GAP_ZONES = {
+    "NEGLIGIBLE": (0.0, 0.03),      # <3% - noise, ignore
+    "EXPLOITABLE": (0.03, 0.08),     # 3-8% - sweet spot, highest continuation probability
+    "EXTENDED": (0.08, 0.15),        # 8-15% - tradeable but fading risk
+    "OVEREXTENDED": (0.15, float("inf")),  # >15% - high fade risk, reduce size
+}
+
+# V8: Gap quality scores (higher = better risk/reward for continuation plays)
+GAP_QUALITY_SCORES = {
+    "NEGLIGIBLE": 0.1,
+    "EXPLOITABLE": 1.0,    # Best zone
+    "EXTENDED": 0.6,
+    "OVEREXTENDED": 0.25,
+}
+
+
+def classify_gap(gap_pct_abs: float) -> str:
+    """Classify gap magnitude into quality zone (V8)"""
+    for zone, (lo, hi) in GAP_ZONES.items():
+        if lo <= gap_pct_abs < hi:
+            return zone
+    return "OVEREXTENDED"
 
 FINNHUB_QUOTE = "https://finnhub.io/api/v1/quote"
 
@@ -105,27 +140,53 @@ def compute_pm_metrics(ticker):
         pm_high = q.get("h")
         pm_low = q.get("l")
         last = q.get("c")
+        prev_close = q.get("pc")  # V8 FIX: Use previous close for true overnight gap
         volume = q.get("v", 0)
 
         if not pm_open or not last:
             return None
 
-        gap_pct = (last - pm_open) / pm_open
+        # V8 FIX (P1 CRITICAL): True overnight gap uses prev_close, NOT pm_open
+        # Old (WRONG): gap_pct = (last - pm_open) / pm_open  ← intra-PM momentum
+        # New (CORRECT): gap_pct = (last - prev_close) / prev_close  ← true gap
+        if prev_close and prev_close > 0:
+            gap_pct = (last - prev_close) / prev_close
+        else:
+            # Fallback if prev_close unavailable (should be rare)
+            gap_pct = (last - pm_open) / pm_open
+            logger.warning(f"{ticker}: prev_close unavailable, using pm_open fallback")
 
-        momentum = (pm_high - pm_low) / pm_low if pm_low else 0
+        # V8: Separate intra-PM momentum (useful metric, but distinct from gap)
+        intra_pm_momentum = (last - pm_open) / pm_open if pm_open > 0 else 0
+
+        # V8: PM range momentum (high-low spread)
+        pm_range = (pm_high - pm_low) / pm_low if pm_low and pm_low > 0 else 0
 
         liquid = volume >= PM_MIN_VOLUME
 
+        # V8: Gap classification and quality score
+        gap_zone = classify_gap(abs(gap_pct))
+        gap_quality = GAP_QUALITY_SCORES.get(gap_zone, 0.1)
+        gap_direction = "UP" if gap_pct > 0 else "DOWN" if gap_pct < 0 else "FLAT"
+
         metrics = {
             "gap_pct": gap_pct,
+            "gap_zone": gap_zone,              # V8: NEGLIGIBLE/EXPLOITABLE/EXTENDED/OVEREXTENDED
+            "gap_quality": gap_quality,          # V8: 0-1 quality score (1.0 = sweet spot)
+            "gap_direction": gap_direction,      # V8: UP/DOWN/FLAT
+            "prev_close": prev_close,            # V8: Preserved for downstream use
+            "intra_pm_momentum": intra_pm_momentum,  # V8: Separated from gap
             "pm_high": pm_high,
             "pm_low": pm_low,
-            "pm_momentum": momentum,
+            "pm_momentum": pm_range,
             "pm_volume": volume,
             "pm_liquid": liquid
         }
 
         cache.set(f"pm_{ticker}", metrics)
+
+        if gap_zone == "EXPLOITABLE" and gap_direction == "UP" and liquid:
+            logger.info(f"🎯 {ticker} SWEET SPOT gap: {gap_pct:+.1%} ({gap_zone}) vol={volume:,}")
 
         return metrics
 

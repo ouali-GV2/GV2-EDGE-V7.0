@@ -256,8 +256,8 @@ def _scan_with_finnhub(tickers: List[str]) -> List[Anomaly]:
     """Scan using Finnhub data (fallback)"""
     anomalies = []
     
-    # Limit for rate limits
-    scan_tickers = tickers[:100]
+    # C7 FIX: Raised from 100 to 200 (IBKR primary, Finnhub fallback)
+    scan_tickers = tickers[:200]
     
     for ticker in scan_tickers:
         try:
@@ -418,7 +418,9 @@ def analyze_with_real_sources(tickers: List[str]) -> List[CatalystEvent]:
         # 2. Fetch Finnhub company news for each ticker
         async def fetch_company_news():
             results = []
-            for ticker in tickers[:20]:  # Limit for rate limits
+            # C7 FIX: Raised from 20 to 50 (IBKR has no rate limit,
+            # Finnhub limit is managed by api_pool)
+            for ticker in tickers[:50]:
                 try:
                     result = await company_scanner.scan_company(ticker, ScanPriority.HOT, classify=False)
                     if result.news_items:
@@ -486,7 +488,8 @@ def _fallback_finnhub_news(tickers: List[str]) -> List[CatalystEvent]:
     """Fallback: Direct Finnhub news fetch"""
     events = []
 
-    for ticker in tickers[:10]:
+    # C7 FIX: Raised from 10 to 25 (Finnhub fallback)
+    for ticker in tickers[:25]:
         try:
             url = f"https://finnhub.io/api/v1/company-news"
             params = {
@@ -708,12 +711,14 @@ def run_anticipation_scan(universe: List[str], mode: str = "auto") -> Dict:
     
     if mode in ["afterhours", "premarket"] and suspects:
         logger.info(f"Step 2: V6.1 Ingestors on {len(suspects)} suspects...")
-        catalysts = analyze_with_real_sources(list(suspects)[:30])
+        # C7 FIX: Raised from 30 to 80 suspects
+        catalysts = analyze_with_real_sources(list(suspects)[:80])
         results["catalysts"] = [asdict(c) for c in catalysts]
 
     elif mode == "intraday" and suspects:
         # During RTH, only high-priority
-        high_priority = [a.ticker for a in anomalies if a.score >= 0.5][:10]
+        # C7 FIX: Raised from 10 to 30 high-priority tickers
+        high_priority = [a.ticker for a in anomalies if a.score >= 0.5][:30]
         if high_priority:
             logger.info(f"Step 2: V6.1 Ingestors (intraday) on {len(high_priority)} high-priority...")
             catalysts = analyze_with_real_sources(high_priority)

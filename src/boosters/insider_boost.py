@@ -371,6 +371,140 @@ class InsiderBoostEngine:
 
 
 # ============================
+# Cluster Detection (A8)
+# ============================
+
+def detect_insider_cluster(ticker: str, days: int = 7, min_insiders: int = 3) -> Optional[Dict]:
+    """
+    Detecte les achats groupes d'insiders via SEC Form 4.
+
+    3+ insiders achetant dans 7 jours = forte conviction interne.
+    C'est un signal beaucoup plus fort qu'un seul achat insider.
+
+    Args:
+        ticker: symbole
+        days: fenetre de detection (default 7 jours)
+        min_insiders: minimum d'insiders distincts
+
+    Returns:
+        Dict with cluster info or None if no cluster detected:
+        {
+            "ticker": str,
+            "insiders": List[str],   # noms des insiders
+            "total_value": float,    # valeur totale des achats
+            "avg_value": float,
+            "has_executive": bool,   # CEO/CFO/COO dans le cluster
+            "cluster_score": float,  # 0-1
+            "signal": str,           # "CLUSTER_STRONG" / "CLUSTER_MODERATE"
+            "days_span": int,
+            "boost": float,          # boost Monster Score (0.10 - 0.20)
+        }
+    """
+    try:
+        engine = get_insider_engine()
+
+        # Utiliser analyze() existant pour recuperer les transactions
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Si deja dans un event loop, utiliser le cache
+                result = None
+            else:
+                result = loop.run_until_complete(engine.analyze(ticker, hours_back=days * 24))
+        except RuntimeError:
+            result = None
+
+        if not result or result.buy_count == 0:
+            return None
+
+        # Compter les acheteurs uniques
+        unique_buyers = result.unique_buyers
+
+        if unique_buyers < min_insiders:
+            return None
+
+        # Verifier si c'est un vrai cluster (achats rapproches)
+        transactions = result.transactions
+        buy_txns = [t for t in transactions if getattr(t, 'is_buy', False) or getattr(t, 'transaction_type', '') == 'P']
+
+        if len(buy_txns) < min_insiders:
+            return None
+
+        # Noms des insiders
+        insider_names = list(set(getattr(t, 'insider_name', 'Unknown') for t in buy_txns))
+
+        # Valeur totale
+        total_value = result.total_buy_value
+        avg_value = total_value / max(1, len(buy_txns))
+
+        # Score du cluster
+        cluster_score = 0.0
+
+        # Nombre d'insiders (plus il y en a, plus c'est fort)
+        insider_component = min(1.0, unique_buyers / 5.0)  # 5 insiders = max
+        cluster_score += insider_component * 0.35
+
+        # Valeur totale (plus c'est gros, plus c'est conviction)
+        if total_value >= 1_000_000:
+            value_component = 1.0
+        elif total_value >= 500_000:
+            value_component = 0.7
+        elif total_value >= 100_000:
+            value_component = 0.4
+        else:
+            value_component = 0.2
+        cluster_score += value_component * 0.30
+
+        # Presence de C-suite
+        has_exec = result.has_executive
+        exec_component = 1.0 if has_exec else 0.3
+        cluster_score += exec_component * 0.20
+
+        # Concentration temporelle (plus c'est serre, plus c'est coordonne)
+        if hasattr(buy_txns[0], 'transaction_date') and hasattr(buy_txns[-1], 'transaction_date'):
+            try:
+                first = buy_txns[0].transaction_date
+                last = buy_txns[-1].transaction_date
+                span = abs((last - first).days) if hasattr(last, 'days') else days
+                tight_component = 1.0 - (span / max(1, days))
+            except Exception:
+                tight_component = 0.5
+        else:
+            tight_component = 0.5
+        cluster_score += tight_component * 0.15
+
+        cluster_score = min(1.0, cluster_score)
+
+        # Signal et boost
+        if cluster_score >= 0.7 or (has_exec and unique_buyers >= 4):
+            signal = "CLUSTER_STRONG"
+            boost = 0.20
+        elif cluster_score >= 0.4:
+            signal = "CLUSTER_MODERATE"
+            boost = 0.15
+        else:
+            signal = "CLUSTER_WEAK"
+            boost = 0.10
+
+        return {
+            "ticker": ticker,
+            "insiders": insider_names[:5],
+            "unique_count": unique_buyers,
+            "total_value": total_value,
+            "avg_value": avg_value,
+            "has_executive": has_exec,
+            "cluster_score": round(cluster_score, 4),
+            "signal": signal,
+            "days_span": days,
+            "boost": boost,
+        }
+
+    except Exception as e:
+        logger.debug(f"Insider cluster detection error {ticker}: {e}")
+        return None
+
+
+# ============================
 # Convenience Functions
 # ============================
 
@@ -423,6 +557,7 @@ __all__ = [
     "get_insider_engine",
     "quick_insider_check",
     "apply_insider_boost",
+    "detect_insider_cluster",
 ]
 
 

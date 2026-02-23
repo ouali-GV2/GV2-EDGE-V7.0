@@ -1,4 +1,4 @@
-# 🎯 IBKR Integration Guide - GV2-EDGE V5.1
+# IBKR Integration Guide - GV2-EDGE V9.0
 
 ## 📊 Tes Abonnements IBKR
 
@@ -218,14 +218,53 @@ if ibkr and ibkr.connected:
 
 ---
 
-## 🚀 Performance Tips
+## IBKR Streaming V9
 
-1. **Utiliser IB Gateway** plutôt que TWS (moins de RAM)
-2. **Cache activé** : `utils/cache.py` évite les calls redondants
-3. **Rate limiting** : Pause 0.1s entre les requêtes
-4. **Reconnexion auto** : Géré par `ibkr_connector.py`
+GV2-EDGE V9 utilise le streaming event-driven IBKR au lieu du polling :
+
+| Mode | Latence | Methode |
+|------|---------|---------|
+| V7 Poll | ~2000ms | reqMktData → sleep(2s) → read → cancel |
+| V9 Streaming | ~10ms | reqMktData → pendingTickersEvent callback |
+
+### Activation
+
+```python
+# config.py
+ENABLE_IBKR_STREAMING = True
+IBKR_MAX_SUBSCRIPTIONS = 200
+```
+
+### Events detectes automatiquement
+
+| Event | Condition | Action |
+|-------|-----------|--------|
+| VOLUME_SPIKE | Volume > 3x baseline | Promotion HOT + scan immediat |
+| PRICE_SURGE | Prix > 3% en 5 min | Feed AccelerationEngine |
+| SPREAD_TIGHTENING | Spread se resserre | Signal institutionnel |
+| NEW_HIGH | Nouveau High of Day | Feed SmallCapRadar |
+
+### Code
+
+```python
+from src.ibkr_streaming import get_ibkr_streaming
+
+streaming = get_ibkr_streaming()
+# Subscriptions persistantes, events en continu
+# Fallback automatique vers ibkr_connector.py si streaming indisponible
+```
 
 ---
 
-**Version:** 5.1.0  
-**Last Updated:** 2026-02-03
+## Performance Tips
+
+1. **Utiliser IB Gateway** plutot que TWS (moins de RAM)
+2. **IBKR Streaming V9** : Latence ~10ms, event-driven
+3. **Cache active** : `utils/cache.py` evite les calls redondants
+4. **Reconnexion auto** : Gere par `ibkr_connector.py` et `ibkr_streaming.py`
+5. **Max 200 subscriptions** : Gere par eviction stale + priorite HOT
+
+---
+
+**Version:** 9.0.0
+**Last Updated:** 2026-02-21

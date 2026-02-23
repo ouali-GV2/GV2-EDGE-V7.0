@@ -1,4 +1,4 @@
-# GV2-EDGE V7.0 - Trader Guide
+# GV2-EDGE V9.0 - Trader Guide
 
 ## Objectif
 
@@ -8,14 +8,34 @@ GV2-EDGE detecte les top gainers small caps US **AVANT** leurs hausses majeures 
 
 ---
 
-## Nouveautes V7.0
+## Nouveautes V9.0
+
+### Multi-Radar V9
+
+**4 radars independants analysent chaque ticker en parallele :**
+
+| Radar | Ce qu'il detecte | Latence |
+|-------|-----------------|---------|
+| **FLOW** | Accumulation volume, derivees, breakout readiness | <10ms |
+| **CATALYST** | Catalysts, news, SEC filings, FDA, earnings | <50ms |
+| **SMART MONEY** | Options inhabituelles, achats insiders | <100ms |
+| **SENTIMENT** | Buzz social, sentiment NLP, repeat runners | <200ms |
+
+### Evolution V7 → V8 → V9
+
+| V7 | V8 | V9 |
+|----|----|----|
+| Score unique (Monster Score) | + AccelerationEngine + SmallCapRadar | + 4 radars paralleles + confluence matrix |
+| Poll mode (2s latence) | Finnhub WebSocket | IBKR Streaming (~10ms) |
+| Seuils fixes | Z-scores adaptatifs | 6 sous-sessions adaptatives |
+| Risk multiplicatif | Risk MIN-based | Momentum override + planchers |
 
 ### Transparence Totale
 
-**V7 montre TOUS les signaux, meme ceux bloques**
+**Le systeme montre TOUS les signaux, meme ceux bloques**
 
-| Avant (V6) | Apres (V7) |
-|------------|------------|
+| Avant (V6) | Apres (V7+) |
+|------------|-------------|
 | Signal bloque = invisible | Signal bloque = visible avec raison |
 | Pas de tracking des misses | Tracking complet pour apprentissage |
 | Blocage a plusieurs niveaux | Blocage uniquement a l'execution |
@@ -28,7 +48,7 @@ GV2-EDGE detecte les top gainers small caps US **AVANT** leurs hausses majeures 
 | 2 | OrderComputer | NON | OUI |
 | 3 | ExecutionGate | OUI | OUI (avec raison) |
 
-### Nouvelles Metriques
+### Metriques V9
 
 | Metrique | Description |
 |----------|-------------|
@@ -36,10 +56,12 @@ GV2-EDGE detecte les top gainers small caps US **AVANT** leurs hausses majeures 
 | **EP** | Edge Probability - probabilite de succes |
 | **Pre-Halt State** | Risque de halt (NORMAL/ELEVATED/HIGH) |
 | **Block Reasons** | Pourquoi l'execution est bloquee |
+| **Confluence** | Nombre de radars en accord (UNANIMOUS/STRONG/MODERATE) |
+| **Lead Radar** | Quel radar a detecte en premier |
 
 ---
 
-## Signaux V7
+## Signaux V9
 
 ### BUY_STRONG
 
@@ -77,7 +99,7 @@ GV2-EDGE detecte les top gainers small caps US **AVANT** leurs hausses majeures 
 
 ---
 
-## Alertes Telegram V7
+## Alertes Telegram V9
 
 ### Format Signal Autorise
 
@@ -88,7 +110,7 @@ Ticker: NVDA
 Signal: BUY_STRONG
 Monster Score: 0.85
 
---- V7 Intelligence ---
+--- V9 Intelligence ---
 Pre-Halt: NORMAL
 MRP: 72 | EP: 68
 
@@ -110,7 +132,7 @@ Ticker: BIOX
 Signal: BUY (BLOCKED)
 Monster Score: 0.72
 
---- V7 Intelligence ---
+--- V9 Intelligence ---
 Pre-Halt: ELEVATED
 
 BLOCKED: DAILY_TRADE_LIMIT, PRE_HALT_ELEVATED
@@ -197,7 +219,7 @@ Avant activation: `context_active = False`
 
 ---
 
-## Timeline V7
+## Timeline V9
 
 ```
 16:00-20:00 ET | AFTER-HOURS
@@ -222,7 +244,7 @@ Avant activation: `context_active = False`
 
 ---
 
-## Risk Management V7
+## Risk Management V9
 
 ### Regles d'Or
 
@@ -244,15 +266,17 @@ Avant activation: `context_active = False`
 
 ---
 
-## Dashboard V7
+## Dashboard V9
 
 Le dashboard affiche:
 
-- **V7 Modules Status**: SignalProducer, OrderComputer, ExecutionGate, RiskGuard
+- **V9 Modules Status**: SignalProducer, OrderComputer, ExecutionGate, RiskGuard, MultiRadar
+- **Multi-Radar**: Status des 4 radars, confluence agreements
 - **Execution Stats**: Allowed vs Blocked ratio
 - **Block Reasons**: Distribution des raisons
-- **Market Memory Status**: MRP/EP activation state
+- **Market Memory Status**: MRP/EP activation state (segmente par catalyst)
 - **Pre-Halt Alerts**: Tickers avec risque halt
+- **IBKR Streaming**: Subscriptions actives, events/seconde
 
 ```bash
 streamlit run dashboards/streamlit_dashboard.py
@@ -260,28 +284,30 @@ streamlit run dashboards/streamlit_dashboard.py
 
 ---
 
-## Performance V7
+## Performance V9
 
-| Metrique | Cible |
-|----------|-------|
-| Detection Rate | 100% (jamais bloque) |
-| Execution Rate | 60-80% |
-| Hit Rate | 70-80% |
-| Early Catch | 60-70% |
-| Avg Win | +50-90% |
-| Avg Loss | -8-12% |
+| Metrique | V7 | Cible V9 |
+|----------|-----|----------|
+| Detection Rate | ~65-70% | **95%+** |
+| Lead Time | ~3-8 min | **10-20 min** |
+| Precision | ~40-50% | **65%+** |
+| Latence L1 | 2000ms | **<50ms** |
+| Couverture catalysts | ~60% | **90%+** |
+| Hit Rate | 70-80% | **80%+** |
 
 ---
 
-## Conseils V7
+## Conseils V9
 
 1. **Lisez les raisons de blocage** - Elles sont la pour vous proteger
 2. **Respectez Pre-Halt** - Ne forcez pas si HIGH
 3. **Utilisez MRP/EP** - Quand actif, c'est un edge supplementaire
 4. **Track vos misses** - Ils alimentent Market Memory
 5. **Attendez l'activation** - MRP/EP dormants au debut = normal
+6. **Observez la confluence** - 4/4 radars = UNANIMOUS = forte conviction
+7. **Notez le lead radar** - Indique l'angle de detection dominant
 
 ---
 
-**Version:** 7.0.0
-**Last Updated:** 2026-02-12
+**Version:** 9.0.0
+**Last Updated:** 2026-02-21

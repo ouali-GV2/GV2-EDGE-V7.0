@@ -317,7 +317,7 @@ def get_system_status():
         "finnhub": False,
         "telegram": False
     }
-    
+
     # Check IBKR
     try:
         from src.ibkr_connector import get_ibkr
@@ -325,7 +325,7 @@ def get_system_status():
         status["ibkr"] = ibkr and ibkr.connected
     except:
         pass
-    
+
     # Check API keys configured
     try:
         from config import GROK_API_KEY, FINNHUB_API_KEY, TELEGRAM_BOT_TOKEN
@@ -334,8 +334,25 @@ def get_system_status():
         status["telegram"] = TELEGRAM_BOT_TOKEN and not TELEGRAM_BOT_TOKEN.startswith("YOUR_")
     except:
         pass
-    
+
     return status
+
+
+def get_ibkr_connection_info():
+    """Get detailed IBKR connection info for dashboard widget"""
+    try:
+        from config import USE_IBKR_DATA
+        if not USE_IBKR_DATA:
+            return None
+
+        from src.ibkr_connector import get_ibkr
+        ibkr = get_ibkr()
+        if ibkr is None:
+            return None
+
+        return ibkr.get_connection_stats()
+    except:
+        return None
 
 
 def get_market_session():
@@ -634,12 +651,48 @@ with st.sidebar:
     # System Status
     st.markdown("### 🛡️ System Status")
     status = get_system_status()
-    
+
     for component, is_ok in status.items():
         icon = "🟢" if is_ok else "🔴"
         st.markdown(f"{icon} **{component.upper()}**")
-    
+
     st.markdown("---")
+
+    # IBKR Connection Widget
+    ibkr_info = get_ibkr_connection_info()
+    if ibkr_info is not None:
+        st.markdown("### 🔌 IBKR Connection")
+
+        state = ibkr_info.get("state", "UNKNOWN")
+        state_icons = {
+            "CONNECTED": "🟢",
+            "RECONNECTING": "🟡",
+            "DISCONNECTED": "🔴",
+            "FAILED": "🔴",
+            "CONNECTING": "🟡",
+        }
+        st.markdown(f"{state_icons.get(state, '⚪')} **{state}**")
+
+        if ibkr_info.get("connected"):
+            uptime_s = ibkr_info.get("uptime_seconds", 0)
+            if uptime_s >= 3600:
+                uptime_str = f"{uptime_s / 3600:.1f}h"
+            elif uptime_s >= 60:
+                uptime_str = f"{uptime_s / 60:.0f}min"
+            else:
+                uptime_str = f"{uptime_s:.0f}s"
+
+            latency = ibkr_info.get("heartbeat_latency_ms", 0)
+
+            st.caption(f"Uptime: {uptime_str} | Latency: {latency:.0f}ms")
+            st.caption(f"Disconnections: {ibkr_info.get('total_disconnections', 0)} | Reconnections: {ibkr_info.get('total_reconnections', 0)}")
+        else:
+            st.caption(f"Host: {ibkr_info.get('host', 'N/A')}")
+            attempts = ibkr_info.get("reconnect_attempts", 0)
+            if attempts > 0:
+                st.caption(f"Reconnect attempts: {attempts}/5")
+
+        st.markdown("---")
 
     # V7 Modules Status
     st.markdown("### 🧠 V7 Modules")

@@ -109,7 +109,11 @@ from src.feature_engine import compute_features
 # IBKR connector for prices
 from src.ibkr_connector import get_ibkr
 
-# Legacy imports (fallback)
+# IBKR Streaming V9 (event-driven, ~10ms latency)
+from src.ibkr_streaming import get_ibkr_streaming, start_ibkr_streaming
+
+# Legacy imports (DEPRECATED - only used by edge_cycle() fallback when USE_V7_ARCHITECTURE=False)
+# V9: Use SignalProducer + OrderComputer + MultiRadarEngine instead
 from src.signal_engine import generate_signal
 from src.portfolio_engine import process_signal
 
@@ -167,6 +171,8 @@ class V7State:
         self._pre_halt: Optional[PreHaltEngine] = None
         self._news_trigger: Optional[IBKRNewsTrigger] = None
         self._missed_tracker = None
+        self._streaming = None
+        self._streaming_started = False
 
     def check_day_rollover(self):
         """Reset daily counters if new day"""
@@ -270,10 +276,32 @@ async def process_ticker_v7(ticker: str, state: V7State) -> Optional[UnifiedSign
         # Get features for market context
         features = compute_features(ticker)
 
-        # Get current price
+        # Get current price — streaming first (10ms), IBKR poll fallback (2s)
         ibkr = get_ibkr()
         quote = None
-        if ibkr and ibkr.connected:
+        streaming_quote = None
+
+        try:
+            streaming = get_ibkr_streaming()
+            if streaming.is_subscribed(ticker):
+                streaming_quote = streaming.get_quote(ticker)
+        except Exception:
+            pass
+
+        if streaming_quote and streaming_quote.is_valid and streaming_quote.last > 0:
+            # Use streaming data (10ms latency)
+            quote = {
+                "last": streaming_quote.last,
+                "bid": streaming_quote.bid,
+                "ask": streaming_quote.ask,
+                "volume": streaming_quote.volume,
+                "high": streaming_quote.high,
+                "low": streaming_quote.low,
+                "vwap": streaming_quote.vwap,
+                "_source": "streaming",
+            }
+        elif ibkr and ibkr.connected:
+            # Fallback to poll mode (2s latency)
             quote = ibkr.get_quote(ticker, use_cache=True)
 
         current_price = quote.get("last", 0) if quote else score_data.get("price", 0)
@@ -713,6 +741,26 @@ def run_edge():
         logger.info(f"  Risk Guard: {'ENABLED' if ENABLE_RISK_GUARD else 'DISABLED'}")
         logger.info(f"  Market Memory: {'ENABLED' if ENABLE_MARKET_MEMORY else 'DISABLED'}")
         logger.info(f"  News Trigger: {'ENABLED' if ENABLE_IBKR_NEWS_TRIGGER else 'DISABLED'}")
+
+        # Start IBKR Streaming V9 (event-driven, ~10ms)
+        if not state._streaming_started:
+            try:
+                universe = load_universe()
+                initial_tickers = universe["ticker"].tolist()[:50] if universe is not None else []
+
+                streaming = start_ibkr_streaming(
+                    tickers=initial_tickers,
+                    connect_hot_queue=True,
+                    connect_radar=True,
+                )
+                if streaming:
+                    state._streaming = streaming
+                    state._streaming_started = True
+                    logger.info(f"  IBKR Streaming: STARTED ({len(initial_tickers)} initial subs)")
+                else:
+                    logger.warning("  IBKR Streaming: FAILED (falling back to poll mode)")
+            except Exception as e:
+                logger.warning(f"  IBKR Streaming: ERROR ({e}) — using poll mode")
 
     while True:
         try:

@@ -1,10 +1,58 @@
 version: "3.9"
 
 services:
+
+  # ============================================
+  # IB Gateway - Headless IBKR API
+  # ============================================
+  # Runs IB Gateway + IBC + Xvfb in a container.
+  # Exposes API on ports 4001 (live) / 4002 (paper).
+  # Auto-restarts on crash or daily IB reset (~23:45 ET).
+  # ============================================
+  ibgateway:
+    build: ./docker/ibgateway
+    container_name: ibgateway
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    ports:
+      - "4001:4001"
+      - "4002:4002"
+
+    volumes:
+      - ibgateway-jts:/root/Jts
+
+    mem_limit: 1g
+    mem_reservation: 512m
+
+    # Healthy once API port responds (120s startup grace)
+    healthcheck:
+      test: ["CMD", "/opt/scripts/healthcheck.sh"]
+      interval: 30s
+      timeout: 5s
+      start_period: 120s
+      retries: 3
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================
+  # GV2-EDGE - Trading Engine + Dashboard
+  # ============================================
   gv2-edge:
     build: .
     container_name: gv2-edge
     restart: unless-stopped
+
+    # Wait for IB Gateway API to be healthy before starting
+    depends_on:
+      ibgateway:
+        condition: service_healthy
 
     ports:
       - "8501:8501"
@@ -17,7 +65,21 @@ services:
 
     environment:
       - TZ=UTC
+      # Connect to IB Gateway container via Docker network
+      - IBKR_HOST=ibgateway
+      - IBKR_PORT=4001
+      - USE_IBKR_DATA=True
 
-    # Limite mémoire compatible docker compose standard (CX33: 8Go)
+    # Limite memoire (CX33: 8Go total, IB Gateway prend 1Go)
     mem_limit: 4g
     mem_reservation: 2g
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  ibgateway-jts:
+    driver: local

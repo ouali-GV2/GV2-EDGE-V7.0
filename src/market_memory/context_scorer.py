@@ -687,3 +687,169 @@ def get_memory_status() -> Dict:
         "stats": stats,
         "mrp_ep_active": is_stable,
     }
+
+
+# ============================================================================
+# MARKET MEMORY V2 — Segmented by Catalyst Type (A14)
+# ============================================================================
+
+import threading as _threading
+
+CATALYST_SEGMENTS = [
+    "EARNINGS", "FDA", "SQUEEZE", "MERGER", "PARTNERSHIP",
+    "GUIDANCE", "INSIDER", "SOCIAL_MOMENTUM", "TECHNICAL", "OTHER"
+]
+
+
+class ContextScorerV2(ContextScorer):
+    """
+    Market Memory V2 — MRP/EP segmente par catalyst type.
+
+    V1 (actuel): Un seul MRP/EP par ticker
+        mrp = get_mrp("AAPL")  # 0.65
+
+    V2: MRP/EP segmente par catalyst type
+        mrp_earnings = get_mrp("AAPL", catalyst="EARNINGS")  # 0.80
+        mrp_fda = get_mrp("AAPL", catalyst="FDA")            # 0.45
+
+    Un ticker peut avoir un excellent historique sur les earnings
+    mais mauvais sur FDA. Le systeme apprend cette nuance.
+    """
+
+    def __init__(self, config=None):
+        super().__init__(config)
+        self._segmented_scores: Dict[str, Dict[str, Dict]] = {}
+        self._segment_lock = _threading.Lock()
+        logger.info("ContextScorerV2 initialized — segmented by catalyst type")
+
+    def score_segmented(self, ticker: str, signal_type: str, signal_score: float,
+                        signal_price: float, catalyst_type: str = "OTHER",
+                        **kwargs) -> ContextScore:
+        """
+        Score avec segmentation par catalyst type.
+
+        Blending: 60% segmented + 40% general quand assez de samples.
+        """
+        base_score = self.score(ticker, signal_type, signal_score, signal_price, **kwargs)
+
+        segment = self._get_segment(ticker, catalyst_type)
+
+        if segment and segment.get("samples", 0) >= 5:
+            seg_mrp = segment.get("mrp", base_score.mrp.score)
+            seg_ep = segment.get("ep", base_score.ep.score)
+
+            blend_mrp = seg_mrp * 0.6 + base_score.mrp.score * 0.4
+            blend_ep = seg_ep * 0.6 + base_score.ep.score * 0.4
+
+            base_score.mrp.score = blend_mrp
+            base_score.ep.score = blend_ep
+            base_score.confidence = min(100, base_score.confidence + 10)
+
+            config = self.config if hasattr(self, 'config') else None
+            mrp_w = config.mrp_weight if config else 0.3
+            ep_w = config.ep_weight if config else 0.7
+            base_score.final_score = blend_mrp * mrp_w + blend_ep * ep_w
+
+        return base_score
+
+    def record_outcome(self, ticker: str, catalyst_type: str,
+                       was_profitable: bool, move_pct: float,
+                       signal_type: str = "BUY") -> None:
+        """
+        Enregistre le resultat d'un trade pour apprentissage segmente.
+        """
+        catalyst_type = catalyst_type.upper()
+        if catalyst_type not in CATALYST_SEGMENTS:
+            catalyst_type = "OTHER"
+
+        with self._segment_lock:
+            if ticker not in self._segmented_scores:
+                self._segmented_scores[ticker] = {}
+
+            if catalyst_type not in self._segmented_scores[ticker]:
+                self._segmented_scores[ticker][catalyst_type] = {
+                    "mrp": 50.0, "ep": 50.0, "confidence": 0,
+                    "samples": 0, "wins": 0, "total_move": 0.0,
+                }
+
+            seg = self._segmented_scores[ticker][catalyst_type]
+            seg["samples"] += 1
+            seg["total_move"] += move_pct
+
+            if was_profitable:
+                seg["wins"] += 1
+
+            win_rate = seg["wins"] / max(1, seg["samples"])
+            avg_move = seg["total_move"] / max(1, seg["samples"])
+
+            seg["mrp"] = min(100, win_rate * 70 + min(30, abs(avg_move)))
+
+            confidence_factor = min(1.0, seg["samples"] / 20)
+            seg["ep"] = win_rate * 100 * confidence_factor + 50 * (1 - confidence_factor)
+            seg["confidence"] = min(100, seg["samples"] * 5)
+
+    def _get_segment(self, ticker: str, catalyst_type: str) -> Optional[Dict]:
+        """Recupere les donnees segmentees."""
+        with self._segment_lock:
+            return self._segmented_scores.get(ticker, {}).get(catalyst_type.upper())
+
+    def get_all_segments(self, ticker: str) -> Dict[str, Dict]:
+        """Retourne tous les segments pour un ticker."""
+        with self._segment_lock:
+            return dict(self._segmented_scores.get(ticker, {}))
+
+    def get_best_catalyst(self, ticker: str) -> Optional[str]:
+        """Retourne le catalyst type avec le meilleur historique."""
+        segments = self.get_all_segments(ticker)
+        if not segments:
+            return None
+        best = max(segments.items(), key=lambda x: x[1].get("ep", 0))
+        if best[1].get("samples", 0) >= 3:
+            return best[0]
+        return None
+
+    def get_segment_summary(self, ticker: str) -> Dict:
+        """Resume des segments pour un ticker."""
+        segments = self.get_all_segments(ticker)
+        summary = {}
+        for cat, data in segments.items():
+            if data.get("samples", 0) > 0:
+                summary[cat] = {
+                    "mrp": round(data["mrp"], 1),
+                    "ep": round(data["ep"], 1),
+                    "win_rate": round(data["wins"] / max(1, data["samples"]) * 100, 1),
+                    "samples": data["samples"],
+                    "avg_move": round(data["total_move"] / max(1, data["samples"]), 2),
+                }
+        return summary
+
+    def get_v2_status(self) -> Dict:
+        """Status du scorer V2."""
+        with self._segment_lock:
+            total_tickers = len(self._segmented_scores)
+            total_segments = sum(len(v) for v in self._segmented_scores.values())
+            total_samples = sum(
+                seg.get("samples", 0)
+                for ticker_data in self._segmented_scores.values()
+                for seg in ticker_data.values()
+            )
+        return {
+            "version": "V2",
+            "tickers_with_segments": total_tickers,
+            "total_segments": total_segments,
+            "total_samples": total_samples,
+            "catalyst_types": CATALYST_SEGMENTS,
+        }
+
+
+_scorer_v2: Optional[ContextScorerV2] = None
+_scorer_v2_lock = _threading.Lock()
+
+
+def get_context_scorer_v2() -> ContextScorerV2:
+    """Get singleton ContextScorerV2 instance."""
+    global _scorer_v2
+    with _scorer_v2_lock:
+        if _scorer_v2 is None:
+            _scorer_v2 = ContextScorerV2()
+    return _scorer_v2

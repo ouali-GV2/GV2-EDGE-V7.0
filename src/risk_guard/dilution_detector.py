@@ -1,20 +1,22 @@
 """
-Dilution Detector - SEC Filings and Offering Analysis
+Dilution Detector V8 - SEC Filings and Offering Analysis
+
+V8 FIX (P4 CRITICAL): Distinction between potential and active dilution
+- Old: S-3 shelf = CRITICAL risk = blocked 90 days (wrong)
+- New: 4-tier classification system:
+  1. ACTIVE_OFFERING → 0.20x (confirmed offering, pricing imminent)
+  2. SHELF_RECENT <30 days → 0.60x (recently filed, monitor closely)
+  3. SHELF_DORMANT >30 days → 0.85x (on file but unused)
+  4. CAPACITY_ONLY → 1.00x (no action, just paperwork)
 
 Detects dilution risks from:
-- S-3 shelf registrations (potential future dilution)
-- Prospectus supplements (imminent offering)
+- S-3 shelf registrations (CAPACITY only, not active dilution)
+- Prospectus supplements (imminent offering - ACTIVE)
 - ATM (At-The-Market) programs
 - Direct offerings / registered direct
 - PIPE deals
 - Warrant exercises
 - Convertible note conversions
-
-Risk levels:
-- CRITICAL: Active offering announced, pricing imminent
-- HIGH: S-3 filed with intent to use, ATM active
-- MEDIUM: Shelf registration on file, warrants outstanding
-- LOW: Old shelf (>1 year), no recent activity
 """
 
 from dataclasses import dataclass, field
@@ -48,6 +50,30 @@ class DilutionRisk(Enum):
     MEDIUM = "MEDIUM"       # Potential risk, monitor closely
     LOW = "LOW"             # Minimal current risk
     NONE = "NONE"           # No dilution detected
+
+
+class DilutionTier(Enum):
+    """
+    V8: 4-tier dilution classification to distinguish potential from active risk.
+
+    A shelf registration (S-3) is NOT the same as an active offering.
+    Previously all were treated as CRITICAL → block 90 days (WRONG).
+    """
+    ACTIVE_OFFERING = "ACTIVE_OFFERING"     # Confirmed offering, pricing imminent → 0.20x
+    SHELF_RECENT = "SHELF_RECENT"           # S-3 filed <30 days ago → 0.60x (monitor)
+    SHELF_DORMANT = "SHELF_DORMANT"         # S-3 filed >30 days ago, unused → 0.85x
+    CAPACITY_ONLY = "CAPACITY_ONLY"         # Old shelf / no activity → 1.00x (no impact)
+    NONE = "NONE"                           # No dilution filings
+
+
+# V8: Position multipliers by dilution tier
+DILUTION_TIER_MULTIPLIERS = {
+    DilutionTier.ACTIVE_OFFERING: 0.20,
+    DilutionTier.SHELF_RECENT: 0.60,
+    DilutionTier.SHELF_DORMANT: 0.85,
+    DilutionTier.CAPACITY_ONLY: 1.00,
+    DilutionTier.NONE: 1.00,
+}
 
 
 @dataclass
@@ -94,6 +120,9 @@ class DilutionProfile:
     risk_level: DilutionRisk = DilutionRisk.NONE
     risk_score: float = 0.0  # 0-100
 
+    # V8: Dilution tier classification (replaces binary logic)
+    dilution_tier: DilutionTier = DilutionTier.NONE
+
     # Active events
     events: List[DilutionEvent] = field(default_factory=list)
 
@@ -119,22 +148,32 @@ class DilutionProfile:
 
     def get_block_reason(self) -> Optional[str]:
         """Get reason string if trade should be blocked."""
-        if self.risk_level == DilutionRisk.CRITICAL:
-            if self.has_active_offering:
-                return "ACTIVE_OFFERING"
-            if self.has_toxic_financing:
-                return "TOXIC_FINANCING"
-            return "CRITICAL_DILUTION"
+        # V8: Only block on truly active/toxic dilution
+        if self.has_toxic_financing:
+            return "TOXIC_FINANCING"
+        if self.has_active_offering:
+            return "ACTIVE_OFFERING"
+        # V8: S-3 shelf alone is NOT a block reason anymore
         return None
 
     def get_position_multiplier(self) -> float:
-        """Get position size multiplier based on risk."""
+        """
+        Get position size multiplier based on dilution tier (V8).
+
+        V8 CHANGE: Uses tier-based multipliers instead of binary risk levels.
+        An S-3 shelf >30 days old → 0.85x (not 0.0x as before).
+        """
+        # V8: Prefer tier-based multiplier if available
+        if self.dilution_tier != DilutionTier.NONE:
+            return DILUTION_TIER_MULTIPLIERS.get(self.dilution_tier, 1.0)
+
+        # Fallback to risk-level based (legacy)
         multipliers = {
-            DilutionRisk.CRITICAL: 0.0,   # Block entirely
-            DilutionRisk.HIGH: 0.25,      # 25% of normal
-            DilutionRisk.MEDIUM: 0.50,    # 50% of normal
-            DilutionRisk.LOW: 0.75,       # 75% of normal
-            DilutionRisk.NONE: 1.0        # Full size
+            DilutionRisk.CRITICAL: 0.20,  # V8: Raised from 0.0 (still tradeable micro-size)
+            DilutionRisk.HIGH: 0.25,
+            DilutionRisk.MEDIUM: 0.50,
+            DilutionRisk.LOW: 0.75,
+            DilutionRisk.NONE: 1.0
         }
         return multipliers.get(self.risk_level, 1.0)
 
@@ -297,7 +336,11 @@ class DilutionDetector:
         profile: DilutionProfile,
         filings: List[Dict]
     ) -> None:
-        """Analyze SEC filings for dilution events."""
+        """
+        Analyze SEC filings for dilution events.
+
+        V8 FIX (P4): Properly classify S-3 shelfs vs active offerings.
+        """
         for filing in filings:
             event = self._parse_filing(profile.ticker, filing)
             if event:
@@ -310,14 +353,19 @@ class DilutionDetector:
                         profile.active_atm_capacity += event.shelf_capacity_remaining
 
                 if event.event_type == DilutionType.S3_SHELF:
-                    if event.days_since_filing() < 90:
+                    # V8 FIX: Classify S-3 by age instead of binary recent/old
+                    days = event.days_since_filing()
+                    if days < 30:
                         profile.has_recent_s3 = True
+                    # Note: S-3 shelf alone does NOT set has_active_offering
                     if event.shelf_capacity_remaining:
                         profile.total_shelf_capacity += event.shelf_capacity_remaining
 
+                # V8: Only these types indicate ACTIVE dilution
                 if event.event_type in [
                     DilutionType.DIRECT_OFFERING,
-                    DilutionType.PROSPECTUS_SUPPLEMENT
+                    DilutionType.PROSPECTUS_SUPPLEMENT,
+                    DilutionType.SECONDARY_OFFERING,
                 ]:
                     if event.days_since_filing() < 7:
                         profile.has_active_offering = True
@@ -333,6 +381,9 @@ class DilutionDetector:
                 if pattern.search(desc):
                     profile.has_toxic_financing = True
                     break
+
+        # V8: Determine dilution tier
+        profile.dilution_tier = self._classify_dilution_tier(profile)
 
     def _parse_filing(
         self,
@@ -425,11 +476,59 @@ class DilutionDetector:
 
         return None
 
+    def _classify_dilution_tier(self, profile: DilutionProfile) -> DilutionTier:
+        """
+        V8: Classify dilution into 4-tier system.
+
+        Tier 1 - ACTIVE_OFFERING: Confirmed offering announced, pricing within days
+        Tier 2 - SHELF_RECENT: S-3 filed <30 days ago, intent unclear
+        Tier 3 - SHELF_DORMANT: S-3 filed >30 days ago, no follow-up activity
+        Tier 4 - CAPACITY_ONLY: Old shelf (>1yr) or no meaningful capacity
+        """
+        # Toxic financing = always treat as active
+        if profile.has_toxic_financing:
+            return DilutionTier.ACTIVE_OFFERING
+
+        # Active offering (prospectus supplement, direct offering within 7 days)
+        if profile.has_active_offering:
+            return DilutionTier.ACTIVE_OFFERING
+
+        # Active ATM program
+        if profile.has_active_atm and profile.active_atm_capacity > 5_000_000:
+            return DilutionTier.ACTIVE_OFFERING
+
+        # Recent S-3 shelf (<30 days)
+        if profile.has_recent_s3:
+            return DilutionTier.SHELF_RECENT
+
+        # Check for dormant shelfs (S-3 filed 30-365 days ago)
+        has_dormant_shelf = False
+        for event in profile.events:
+            if event.event_type == DilutionType.S3_SHELF:
+                days = event.days_since_filing()
+                if 30 <= days <= 365:
+                    has_dormant_shelf = True
+                    break
+
+        if has_dormant_shelf:
+            return DilutionTier.SHELF_DORMANT
+
+        # Old shelf (>1 year) or minimal capacity
+        if profile.total_shelf_capacity > 0:
+            return DilutionTier.CAPACITY_ONLY
+
+        return DilutionTier.NONE
+
     def _calculate_risk(self, profile: DilutionProfile) -> None:
-        """Calculate overall risk level and score."""
+        """
+        Calculate overall risk level and score.
+
+        V8 FIX (P4): Risk calculation respects dilution tier.
+        S-3 shelfs contribute less to risk score than active offerings.
+        """
         score = 0.0
 
-        # Critical flags
+        # Critical flags (truly dangerous)
         if profile.has_toxic_financing:
             score += 50
         if profile.has_active_offering:
@@ -438,33 +537,38 @@ class DilutionDetector:
         # High risk factors
         if profile.has_active_atm:
             score += 25
-            # Additional risk if ATM capacity is high vs market cap
             if profile.active_atm_capacity > 0:
                 score += min(15, profile.active_atm_capacity / 10_000_000)
 
-        if profile.has_recent_s3:
-            score += 20
+        # V8 FIX: S-3 shelf score depends on tier, not binary
+        if profile.dilution_tier == DilutionTier.SHELF_RECENT:
+            score += 15  # V8: Reduced from 20 (recent but not active)
+        elif profile.dilution_tier == DilutionTier.SHELF_DORMANT:
+            score += 5   # V8: Dormant shelf = minimal risk
+        elif profile.dilution_tier == DilutionTier.CAPACITY_ONLY:
+            score += 2   # V8: Old shelf = negligible
 
         # Medium risk factors
         if profile.total_shelf_capacity > 50_000_000:
-            score += 15
+            score += 10  # V8: Reduced from 15
         elif profile.total_shelf_capacity > 0:
-            score += 10
+            score += 5   # V8: Reduced from 10
 
         # Event-based scoring
         for event in profile.events:
             if event.is_stale(365):
-                continue  # Old events don't count much
+                continue
 
             days = event.days_since_filing()
-            recency_multiplier = max(0.1, 1.0 - (days / 180))  # Decay over 6 months
+            recency_multiplier = max(0.1, 1.0 - (days / 180))
 
+            # V8: Different base scores for active vs shelf events
             event_scores = {
-                DilutionType.PROSPECTUS_SUPPLEMENT: 30,
+                DilutionType.PROSPECTUS_SUPPLEMENT: 30,  # Active = high score
                 DilutionType.DIRECT_OFFERING: 25,
                 DilutionType.PIPE_DEAL: 20,
                 DilutionType.ATM_PROGRAM: 15,
-                DilutionType.S3_SHELF: 10,
+                DilutionType.S3_SHELF: 5,               # V8: Reduced from 10 (shelf ≠ active)
                 DilutionType.WARRANT_EXERCISE: 15,
                 DilutionType.CONVERTIBLE_NOTE: 20,
             }
@@ -476,7 +580,10 @@ class DilutionDetector:
         profile.risk_score = min(100.0, score)
 
         # Determine risk level
-        if profile.risk_score >= 70 or profile.has_toxic_financing or profile.has_active_offering:
+        # V8: CRITICAL only for truly dangerous situations
+        if profile.has_toxic_financing or profile.has_active_offering:
+            profile.risk_level = DilutionRisk.CRITICAL
+        elif profile.risk_score >= 70:
             profile.risk_level = DilutionRisk.CRITICAL
         elif profile.risk_score >= 45:
             profile.risk_level = DilutionRisk.HIGH
@@ -486,6 +593,12 @@ class DilutionDetector:
             profile.risk_level = DilutionRisk.LOW
         else:
             profile.risk_level = DilutionRisk.NONE
+
+        logger.debug(
+            f"{profile.ticker} dilution: tier={profile.dilution_tier.value}, "
+            f"risk={profile.risk_level.value}, score={profile.risk_score:.0f}, "
+            f"multiplier={profile.get_position_multiplier():.2f}"
+        )
 
     async def analyze_batch(
         self,

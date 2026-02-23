@@ -1,16 +1,19 @@
 """
-Unified Risk Guard - Central Risk Orchestrator
+Unified Risk Guard V8 - Central Risk Orchestrator
+
+V8 FIXES (from REVIEW):
+- P3 CRITICAL: Fixed over-blocking of top gainers small-caps
+  - Added momentum_override: if catalyst + price >5% + volume z-score >2.0, reduce penalty 50%
+  - Minimum position floor: 0.10 for penny, 0.25 for standard (never 0.0 unless truly toxic)
+  - Block ONLY on: confirmed delisting, active halt, toxic financing, manual block
+- P16: Replaced catastrophic multiplicative stacking with MIN-based approach
+  - Old: 0.5 × 0.5 × 0.25 = 0.0625 (94% reduction from 3 medium risks)
+  - New: min(0.5, 0.5, 0.25) = 0.25 (worst single factor, not product)
 
 Combines all risk detection modules into a single interface:
 - Dilution Detector: SEC filings, offerings, toxic financing
 - Compliance Checker: Exchange deficiencies, delisting risk
 - Halt Monitor: Trading halts, LULD tracking, halt prediction
-
-Provides:
-- Unified risk assessment for any ticker
-- Block/reduce trade recommendations
-- Real-time risk monitoring
-- Integration with Execution Gate
 """
 
 from dataclasses import dataclass, field
@@ -148,6 +151,15 @@ class RiskAssessment:
 
 
 @dataclass
+class MomentumContext:
+    """V8: Market context for momentum override decisions."""
+    price_change_pct: float = 0.0    # Current session price change %
+    volume_zscore: float = 0.0       # Volume z-score vs 20-day baseline
+    has_catalyst: bool = False        # Active catalyst detected
+    monster_score: float = 0.0        # Current monster score
+
+
+@dataclass
 class GuardConfig:
     """Configuration for UnifiedGuard."""
     # Enable/disable components
@@ -156,6 +168,7 @@ class GuardConfig:
     enable_halt: bool = True
 
     # Thresholds for blocking
+    # V8: Only block on truly dangerous conditions (not potential risks)
     block_on_critical: bool = True
     block_on_active_offering: bool = True
     block_on_delisting_risk: bool = True
@@ -163,8 +176,20 @@ class GuardConfig:
     block_on_halt_imminent: bool = True
 
     # Position sizing
-    min_position_multiplier: float = 0.10  # Minimum 10%
-    apply_combined_multipliers: bool = True  # Multiply all factors
+    # V8 FIX (P3): Increased minimum floors to prevent total blocking of small-caps
+    min_position_multiplier: float = 0.10       # Minimum 10% (penny stocks)
+    min_position_multiplier_standard: float = 0.25  # V8: Minimum 25% (standard stocks >$1)
+
+    # V8 FIX (P16): Use MIN instead of MULTIPLY for combining risk multipliers
+    # Old: apply_combined_multipliers = True → 0.5 × 0.5 × 0.25 = 0.0625
+    # New: apply_combined_multipliers = False → min(0.5, 0.5, 0.25) = 0.25
+    apply_combined_multipliers: bool = False  # V8: DEFAULT CHANGED to False (MIN mode)
+
+    # V8: Momentum override - reduce penalty when stock shows strong momentum
+    enable_momentum_override: bool = True
+    momentum_override_min_price_change: float = 0.05   # +5% price change
+    momentum_override_min_volume_zscore: float = 2.0    # Volume 2+ std devs above mean
+    momentum_override_penalty_reduction: float = 0.50   # Reduce penalty by 50%
 
     # Cache
     cache_ttl_seconds: int = 300  # 5 minutes
@@ -224,7 +249,8 @@ class UnifiedGuard:
         volatility: Optional[float] = None,
         normal_volatility: Optional[float] = None,
         sec_filings: Optional[List[Dict]] = None,
-        force_refresh: bool = False
+        force_refresh: bool = False,
+        momentum_context: Optional[MomentumContext] = None
     ) -> RiskAssessment:
         """
         Perform complete risk assessment for a ticker.
@@ -236,6 +262,7 @@ class UnifiedGuard:
             normal_volatility: Baseline volatility
             sec_filings: SEC filings for dilution/compliance analysis
             force_refresh: Bypass cache
+            momentum_context: V8 - Market momentum context for override decisions
 
         Returns:
             Complete RiskAssessment
@@ -314,8 +341,8 @@ class UnifiedGuard:
                 assessment.halt_profile = halt_profile
                 assessment.flags.extend(halt_flags)
 
-        # Calculate overall assessment
-        self._calculate_overall(assessment)
+        # Calculate overall assessment (V8: with momentum context)
+        self._calculate_overall(assessment, current_price, momentum_context)
 
         # Cache result
         self._cache_assessment(assessment)
@@ -585,8 +612,21 @@ class UnifiedGuard:
             logger.error(f"Error assessing halt risk for {ticker}: {e}")
             return None, []
 
-    def _calculate_overall(self, assessment: RiskAssessment) -> None:
-        """Calculate overall risk level and action."""
+    def _calculate_overall(
+        self,
+        assessment: RiskAssessment,
+        current_price: Optional[float] = None,
+        momentum_context: Optional[MomentumContext] = None
+    ) -> None:
+        """
+        Calculate overall risk level and action.
+
+        V8 CHANGES:
+        - P16: Default to MIN mode (worst single factor) instead of multiplicative
+        - P3: Momentum override reduces penalty for stocks with strong breakout signals
+        - P3: Higher minimum floor for standard stocks ($1+)
+        - P3: Only truly dangerous conditions cause total block (0.0)
+        """
         if not assessment.flags:
             assessment.overall_level = RiskLevel.LOW
             assessment.action = TradeAction.ALLOW
@@ -624,26 +664,72 @@ class UnifiedGuard:
 
         assessment.overall_score = min(100.0, score)
 
-        # Check for blocking flags
-        blocking_flags = assessment.get_blocking_flags()
+        # V8 FIX (P3): Only block on truly dangerous conditions
+        # Filter blocking flags to only include confirmed dangers
+        HARD_BLOCK_CODES = {
+            "CURRENTLY_HALTED", "TOXIC_FINANCING", "DELISTING_RISK",
+            "MANUAL_BLOCK", "ACTIVE_OFFERING"
+        }
+        blocking_flags = [
+            f for f in assessment.get_blocking_flags()
+            if f.code in HARD_BLOCK_CODES
+        ]
+
         if blocking_flags:
             assessment.is_blocked = True
             assessment.block_reasons = [f.code for f in blocking_flags]
             assessment.action = TradeAction.BLOCK
             assessment.position_multiplier = 0.0
         else:
-            # Calculate position multiplier
+            # V8 FIX (P16): Use MIN mode by default instead of multiplicative
             if self.config.apply_combined_multipliers:
-                # Multiply all multipliers together
+                # Legacy mode: Multiply all multipliers (can be catastrophic)
                 multiplier = 1.0
                 for flag in assessment.flags:
                     multiplier *= flag.position_multiplier
             else:
-                # Use minimum multiplier
-                multiplier = min(f.position_multiplier for f in assessment.flags)
+                # V8 DEFAULT: Use worst single factor (MIN mode)
+                # This prevents 0.5 × 0.5 × 0.25 = 0.0625 situations
+                multipliers = [f.position_multiplier for f in assessment.flags if f.position_multiplier < 1.0]
+                multiplier = min(multipliers) if multipliers else 1.0
 
-            # Apply minimum threshold
-            multiplier = max(multiplier, self.config.min_position_multiplier)
+            # V8 FIX (P3): Momentum override for stocks in active breakout
+            if (
+                self.config.enable_momentum_override
+                and momentum_context is not None
+                and multiplier < 1.0
+            ):
+                has_strong_momentum = (
+                    momentum_context.price_change_pct >= self.config.momentum_override_min_price_change
+                    and momentum_context.volume_zscore >= self.config.momentum_override_min_volume_zscore
+                )
+                has_catalyst_momentum = (
+                    momentum_context.has_catalyst
+                    and momentum_context.price_change_pct >= 0.03  # 3% with catalyst
+                )
+
+                if has_strong_momentum or has_catalyst_momentum:
+                    # Reduce the penalty by configured amount (default 50%)
+                    penalty = 1.0 - multiplier
+                    reduced_penalty = penalty * (1.0 - self.config.momentum_override_penalty_reduction)
+                    old_multiplier = multiplier
+                    multiplier = 1.0 - reduced_penalty
+
+                    logger.info(
+                        f"{assessment.ticker} MOMENTUM OVERRIDE: "
+                        f"multiplier {old_multiplier:.2f} → {multiplier:.2f} "
+                        f"(price {momentum_context.price_change_pct:+.1%}, "
+                        f"vol z={momentum_context.volume_zscore:.1f}, "
+                        f"catalyst={momentum_context.has_catalyst})"
+                    )
+
+            # V8 FIX (P3): Apply appropriate minimum floor based on price
+            is_penny = current_price is not None and current_price < 1.0
+            min_floor = (
+                self.config.min_position_multiplier if is_penny
+                else self.config.min_position_multiplier_standard
+            )
+            multiplier = max(multiplier, min_floor)
             assessment.position_multiplier = multiplier
 
             # Determine action
@@ -659,11 +745,15 @@ class UnifiedGuard:
 
         # Generate summary
         categories = set(f.category.value for f in assessment.flags)
+        momentum_note = ""
+        if momentum_context and momentum_context.price_change_pct >= 0.03:
+            momentum_note = f" [MOMENTUM: {momentum_context.price_change_pct:+.1%}]"
+
         assessment.summary = (
             f"{assessment.overall_level.value} risk ({assessment.overall_score:.0f} score) - "
             f"Categories: {', '.join(categories)} - "
             f"Action: {assessment.action.value} "
-            f"(position x{assessment.position_multiplier:.2f})"
+            f"(position x{assessment.position_multiplier:.2f}){momentum_note}"
         )
 
     def _cache_assessment(self, assessment: RiskAssessment) -> None:

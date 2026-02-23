@@ -1,4 +1,4 @@
-# GV2-EDGE V7.0 - Documentation Complète
+# GV2-EDGE V9.0 - Documentation Complete
 
 ## Table des Matières
 
@@ -56,30 +56,41 @@ GV2-EDGE est un système automatisé de détection de momentum conçu pour ident
 ### Structure des Répertoires
 
 ```
-GV2-EDGE-V5.1/
-├── main.py                    # Point d'entrée principal
-├── config.py                  # Configuration centralisée
+GV2-EDGE-V9.0/
+├── main.py                    # Point d'entree principal
+├── config.py                  # Configuration centralisee
 ├── .env                       # Variables d'environnement (API keys)
 │
 ├── src/                       # Code source principal
-│   ├── engines/               # Moteurs de décision (V7)
-│   ├── models/                # Types et structures de données
-│   ├── risk_guard/            # Gestion des risques (V7)
-│   ├── market_memory/         # Système d'apprentissage (V7)
+│   ├── engines/               # Moteurs V7/V8/V9 (coeur du systeme)
+│   │   ├── signal_producer.py        # Layer 1: Detection V8
+│   │   ├── order_computer.py         # Layer 2: Calcul ordres
+│   │   ├── execution_gate.py         # Layer 3: Gate execution
+│   │   ├── acceleration_engine.py    # V8: Derivees + z-scores
+│   │   ├── smallcap_radar.py         # V8: Radar anticipatif
+│   │   ├── ticker_state_buffer.py    # V8: Ring buffer 120pts
+│   │   └── multi_radar_engine.py     # V9: 4 radars + confluence
+│   ├── ibkr_streaming.py     # V9: Streaming temps reel IBKR
+│   ├── finnhub_ws_screener.py # V8: WebSocket Finnhub
+│   ├── top_gainers_source.py  # V8: Source top gainers
+│   ├── models/                # Types et structures de donnees
+│   ├── risk_guard/            # Gestion des risques (V8)
+│   ├── market_memory/         # Systeme d'apprentissage (V7)
 │   ├── weekend_mode/          # Mode weekend (V7)
-│   ├── api_pool/              # Gestion multi-clés API (V7)
-│   ├── event_engine/          # Détection d'événements
-│   ├── ingestors/             # Ingestion de données
-│   ├── processors/            # Traitement de données
-│   ├── schedulers/            # Planification des tâches
+│   ├── api_pool/              # Gestion multi-cles API (V7)
+│   ├── event_engine/          # Detection d'evenements
+│   ├── ingestors/             # Ingestion de donnees
+│   ├── processors/            # Traitement de donnees
+│   ├── schedulers/            # Planification des taches
 │   ├── monitors/              # Monitoring pipeline
 │   ├── scoring/               # Calcul des scores
+│   ├── boosters/              # Boosters additifs (insider, squeeze)
 │   └── social_engine/         # Analyse sociale
 │
 ├── utils/                     # Utilitaires
-├── alerts/                    # Système d'alertes
-├── monitoring/                # Surveillance système
-├── data/                      # Données runtime
+├── alerts/                    # Systeme d'alertes
+├── monitoring/                # Surveillance systeme
+├── data/                      # Donnees runtime
 └── logs/                      # Fichiers de log
 ```
 
@@ -190,13 +201,18 @@ nohup python main.py > output.log 2>&1 &
 
 ## Modules Principaux
 
-### 1. Signal Engine (`src/signal_engine.py`)
+### 1. Signal Producer V8 (`src/engines/signal_producer.py`)
 
-**Rôle:** Génère les signaux de trading pour chaque ticker.
+**Role:** Layer 1 — Detection illimitee de signaux. Ne bloque JAMAIS.
 
-**Fonctions principales:**
-- `generate_signal(ticker)` - Génère un signal pour un ticker
-- `generate_many(tickers)` - Génère pour plusieurs tickers
+**Integration V8/V9:**
+- AccelerationEngine : detecte ACCUMULATING/LAUNCHING avant le mouvement
+- SmallCapRadar : phases ACCUMULATING → PRE_LAUNCH → LAUNCHING → BREAKOUT
+- Multi-Radar V9 : 4 radars paralleles (Flow, Catalyst, Smart Money, Sentiment)
+
+### 1bis. Signal Engine Legacy (`src/signal_engine.py`)
+
+**Role:** [LEGACY] Module original, delegue au SignalProducer V8.
 
 **Output:**
 ```python
@@ -464,10 +480,11 @@ Monster Score = Σ (Weight × Component Score)
 | **Volume** | 17% | Spike de volume vs moyenne |
 | **Pattern** | 17% | Patterns techniques (flags, consolidation) |
 | **PM Transition** | 13% | Momentum pre-market → regular |
-| **Options Flow** | 10% | Activité options inhabituelle |
-| **Momentum** | 8% | Accélération du prix |
-| **Social Buzz** | 6% | Mentions réseaux sociaux |
+| **Options Flow** | 10% | Activite options inhabituelle |
+| **Acceleration** | 7% | [V8] Derivees + z-scores |
+| **Momentum** | 4% | [Reduit V8] Velocite prix |
 | **Squeeze** | 4% | Compression Bollinger Bands |
+| **Social Buzz** | 3% | [Reduit V8] Mentions reseaux sociaux |
 | **Total** | **100%** | |
 
 ### Exemple de Calcul
@@ -1045,26 +1062,28 @@ python -c "from src.signal_engine import generate_many; generate_many(['AAPL', '
 
 ---
 
-## Résumé des Modules V7.0
+## Resume des Modules V9.0
 
-| Module | Fichiers | Lignes | Fonction |
-|--------|----------|--------|----------|
-| `engines/` | 4 | ~1,800 | Detection/Execution séparation |
-| `api_pool/` | 5 | ~2,100 | Gestion multi-clés API |
-| `risk_guard/` | 5 | ~2,900 | Évaluation des risques |
-| `weekend_mode/` | 5 | ~2,800 | Préparation weekend/Monday |
-| `market_memory/` | 5 | ~2,500 | Apprentissage historique |
-| **Total V7** | **24** | **~12,100** | |
+| Module | Fichiers | Fonction |
+|--------|----------|----------|
+| `engines/` | 7 | Detection V8 + Acceleration + Multi-Radar V9 |
+| `api_pool/` | 5 | Gestion multi-cles API |
+| `risk_guard/` | 5 | Evaluation des risques V8 (MIN-based) |
+| `weekend_mode/` | 5 | Preparation weekend/Monday |
+| `market_memory/` | 5 | Apprentissage historique |
+| `ibkr_streaming.py` | 1 | V9: Streaming temps reel IBKR |
+| `finnhub_ws_screener.py` | 1 | V8: WebSocket Finnhub |
+| `top_gainers_source.py` | 1 | V8: Source top gainers |
 
 ---
 
 ## Contact et Support
 
 - **Issues:** GitHub Issues
-- **Logs:** `logs/gv2edge.log`
+- **Logs:** `data/logs/gv2edge.log`
 - **Config:** `config.py` et `.env`
 
 ---
 
-*Documentation générée pour GV2-EDGE V7.0*
-*Dernière mise à jour: Février 2026*
+*Documentation generee pour GV2-EDGE V9.0*
+*Derniere mise a jour: 2026-02-21*

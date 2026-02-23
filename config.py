@@ -12,9 +12,10 @@ FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "")
 # ========= IBKR CONNECTION =========
 
 # Use IBKR for real-time market data (Level 1)
-# Set to True only if IB Gateway/TWS is running (requires GUI or xvfb)
-# On headless servers (Hetzner CX33, etc.), set to False to use Finnhub
-USE_IBKR_DATA = os.getenv("USE_IBKR_DATA", "False").lower() in ("true", "1", "yes")
+# IBKR Gateway actif sur Hetzner CX43 (via xvfb)
+# Abonnements : L1 US Equities (Network A/B/C) + OPRA Options US
+# Fallback automatique vers Finnhub si Gateway deconnecte
+USE_IBKR_DATA = os.getenv("USE_IBKR_DATA", "True").lower() in ("true", "1", "yes")
 
 IBKR_HOST = os.getenv("IBKR_HOST", "127.0.0.1")
 IBKR_PORT = int(os.getenv("IBKR_PORT", "7497"))   # 7497 = paper trading, 7496 = live, 4001/4002 = Gateway
@@ -126,19 +127,23 @@ DEFAULT_MONSTER_WEIGHTS = {
 }
 # Note: La somme DOIT faire 1.0 pour cohérence
 
-# Poids OPTIMISÉS V3 (avec options flow + social buzz)
-# Intègre les modules d'intelligence pour scoring complet
+# Poids OPTIMISÉS V4 (avec acceleration engine V8)
+# V8 CHANGES:
+# - NEW: acceleration (7%) - derivative-based anticipatory detection
+# - REDUCED: momentum (8% → 4%) - replaced by acceleration derivatives
+# - REDUCED: social_buzz (6% → 3%) - low reliability (80% placeholder per review)
 ADVANCED_MONSTER_WEIGHTS = {
-    "event": 0.25,          # ↓ 30% → 25% (catalysts toujours importants)
-    "volume": 0.17,         # ↓ 20% → 17% (confirmation essentielle)
-    "pattern": 0.17,        # ↓ 20% → 17% (patterns structurels)
-    "pm_transition": 0.13,  # ↓ 15% → 13% (timing PM→RTH)
-    "momentum": 0.08,       # ↓ 10% → 8% (momentum suit, ne prédit pas)
-    "squeeze": 0.04,        # ↓ 5% → 4% (low priority)
-    "options_flow": 0.10,   # NEW: Options activity (volume + concentration)
-    "social_buzz": 0.06,    # NEW: Social media buzz (Twitter, Reddit, StockTwits)
+    "event": 0.25,          # Catalysts toujours importants
+    "volume": 0.17,         # Confirmation essentielle
+    "pattern": 0.17,        # Patterns structurels
+    "pm_transition": 0.13,  # Timing PM→RTH
+    "acceleration": 0.07,   # V8 NEW: Anticipatory detection (velocity + accel)
+    "momentum": 0.04,       # ↓ 8% → 4% (redundant with acceleration)
+    "squeeze": 0.04,        # Low priority
+    "options_flow": 0.10,   # Options activity
+    "social_buzz": 0.03,    # ↓ 6% → 3% (low reliability per review)
 }
-# Total = 1.0 (25+17+17+13+8+4+10+6 = 100%)
+# Total = 1.0 (25+17+17+13+7+4+4+10+3 = 100%)
 
 # ============================
 # PATTERN ANALYZER SETTINGS
@@ -429,3 +434,48 @@ MARKET_MEMORY_MIN_MISSES = 50         # Minimum tracked misses
 MARKET_MEMORY_MIN_TRADES = 30         # Minimum recorded trades
 MARKET_MEMORY_MIN_PATTERNS = 10       # Minimum learned patterns
 MARKET_MEMORY_MIN_PROFILES = 20       # Minimum ticker profiles
+
+# ============================
+# V8: ACCELERATION ENGINE
+# ============================
+
+ENABLE_ACCELERATION_ENGINE = True      # Enable V8 anticipatory detection
+
+# TickerStateBuffer settings
+TICKER_BUFFER_MAX_SNAPSHOTS = 120      # 2 hours at 1-min intervals
+TICKER_BUFFER_DERIVATIVE_WINDOW = 5    # Samples for derivative calculation
+
+# Acceleration detection thresholds (z-score based)
+ACCEL_VOLUME_ZSCORE_THRESHOLD = 1.5    # Volume z-score for "interesting"
+ACCEL_VOLUME_ZSCORE_STRONG = 2.5       # Volume z-score for "strong signal"
+ACCEL_ACCUMULATION_MIN = 0.30          # Min accumulation score to flag
+ACCEL_BREAKOUT_READINESS_MIN = 0.50    # Min readiness for launch alert
+
+# ============================
+# V8: SMALLCAP RADAR
+# ============================
+
+ENABLE_SMALLCAP_RADAR = True           # Enable V8 small-cap radar
+RADAR_SENSITIVITY = "HIGH"             # ULTRA / HIGH / STANDARD
+RADAR_SCAN_INTERVAL = 5               # Seconds between scans (fast: buffer reads only)
+
+# Risk Guard V8 overrides
+RISK_APPLY_COMBINED_MULTIPLIERS = False  # V8: Use MIN mode (not multiplicative)
+RISK_ENABLE_MOMENTUM_OVERRIDE = True     # V8: Allow momentum to reduce risk penalties
+
+# ============================
+# V9: MULTI-RADAR ENGINE
+# ============================
+
+ENABLE_MULTI_RADAR = True                 # Enable V9 multi-radar detection (4 radars paralleles)
+
+# Seuils de signal confluence
+MULTI_RADAR_BUY_STRONG_THRESHOLD = 0.75   # Score confluence minimum pour BUY_STRONG
+MULTI_RADAR_BUY_THRESHOLD = 0.55          # Score confluence minimum pour BUY
+MULTI_RADAR_WATCH_THRESHOLD = 0.35        # Score confluence minimum pour WATCH
+MULTI_RADAR_EARLY_THRESHOLD = 0.20        # Score confluence minimum pour EARLY_SIGNAL
+
+# Bonus de confluence (recompense l'accord entre radars)
+MULTI_RADAR_UNANIMOUS_BONUS = 0.15        # 4/4 radars actifs
+MULTI_RADAR_STRONG_BONUS = 0.10           # 3/4 radars actifs
+MULTI_RADAR_MODERATE_BONUS = 0.05         # 2/4 radars actifs

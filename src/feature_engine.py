@@ -219,7 +219,11 @@ def compute_features(ticker, include_advanced=True):
     try:
         df = fetch_candles(ticker)
 
-        if df is None or len(df) < 20:
+        # C9 FIX: Reduced from 20 to 5 bars minimum
+        # 20 bars was too restrictive — many small-cap tickers have limited
+        # intraday data especially in pre-market. 5 bars is enough for
+        # momentum, volume spike, and VWAP calculations.
+        if df is None or len(df) < 5:
             return None
 
         feats = {

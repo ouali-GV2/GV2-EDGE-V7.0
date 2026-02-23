@@ -42,10 +42,11 @@ logger = get_logger("HOT_TICKER_QUEUE")
 # Configuration
 # ============================
 
-# TTL for each priority level (seconds)
-TTL_HOT = 3600  # 1 hour
-TTL_WARM = 1800  # 30 min
-TTL_NORMAL = 900  # 15 min
+# C6 FIX: Extended TTL (was 1h/30m/15m — too short, hot tickers expired
+# before they could spike). Auto-renewal on re-scan keeps active tickers alive.
+TTL_HOT = 14400   # 4 hours (was 1h)
+TTL_WARM = 7200   # 2 hours (was 30 min)
+TTL_NORMAL = 3600  # 1 hour (was 15 min)
 
 # Scan intervals (seconds)
 INTERVAL_HOT = 90  # 1.5 min
@@ -311,14 +312,31 @@ class HotTickerQueue:
 
             return result
 
-    def mark_scanned(self, ticker: str):
-        """Mark ticker as just scanned"""
+    def mark_scanned(self, ticker: str, still_active: bool = False):
+        """
+        Mark ticker as just scanned.
+
+        C6 FIX: If still_active=True, auto-renew TTL so hot tickers
+        don't expire while they're still showing activity.
+        """
         ticker = ticker.upper()
 
         with self._lock:
             if ticker in self._tickers:
-                self._tickers[ticker].last_scan = datetime.utcnow()
-                self._save_to_db(self._tickers[ticker])
+                hot = self._tickers[ticker]
+                hot.last_scan = datetime.utcnow()
+
+                # C6: Auto-renewal — extend TTL if ticker still shows activity
+                if still_active:
+                    ttl = {
+                        TickerPriority.HOT: TTL_HOT,
+                        TickerPriority.WARM: TTL_WARM,
+                        TickerPriority.NORMAL: TTL_NORMAL
+                    }
+                    hot.expires_at = datetime.utcnow() + timedelta(seconds=ttl[hot.priority])
+                    logger.debug(f"Auto-renewed TTL for {ticker} ({hot.priority.name})")
+
+                self._save_to_db(hot)
 
     def promote(self, ticker: str, new_priority: TickerPriority):
         """Promote ticker to higher priority"""

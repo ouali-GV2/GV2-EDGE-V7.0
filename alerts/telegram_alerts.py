@@ -800,6 +800,250 @@ Level: *{trigger_level}*
 
 
 # ============================
+# IBKR Connection Alert (V7.1)
+# ============================
+
+def send_ibkr_connection_alert(status: str, details: dict = None):
+    """
+    Send IBKR connection status alert.
+
+    Args:
+        status: "disconnected", "reconnected", "failed"
+        details: Optional dict with downtime_seconds, reconnections, etc.
+    """
+    details = details or {}
+
+    if status == "disconnected":
+        msg = (
+            "\U0001F50C *IBKR DISCONNECTED*\n\n"
+            "Connection lost. Attempting automatic reconnection...\n"
+            "\U000023F3 Backoff: 0s, 2s, 5s, 15s, 30s (5 attempts max)"
+        )
+
+    elif status == "reconnected":
+        downtime = details.get("downtime_seconds", 0)
+        total_reconnections = details.get("reconnections", 0)
+
+        if downtime < 60:
+            downtime_str = f"{downtime:.0f}s"
+        else:
+            downtime_str = f"{downtime / 60:.1f}min"
+
+        msg = (
+            f"\U00002705 *IBKR RECONNECTED*\n\n"
+            f"\U000023F1 Downtime: `{downtime_str}`\n"
+            f"\U0001F504 Total reconnections: `{total_reconnections}`\n\n"
+            f"Data feed restored."
+        )
+
+    elif status == "failed":
+        total_disconnections = details.get("disconnections", 0)
+        msg = (
+            f"\U0001F6A8 *IBKR CONNECTION FAILED*\n\n"
+            f"5 reconnection attempts exhausted.\n"
+            f"\U0001F504 Total disconnections: `{total_disconnections}`\n\n"
+            f"\U000026A0 *Fallback: Finnhub data active*\n"
+            f"Manual intervention may be required."
+        )
+
+    else:
+        msg = f"\U0001F50C *IBKR {status.upper()}*"
+
+    send_message(msg)
+
+
+# ============================
+# V9 ENRICHED SIGNAL ALERT (A17)
+# ============================
+
+def send_enriched_signal_alert(
+    ticker: str,
+    signal_type: str,
+    monster_score: float,
+    entry: float = 0,
+    stop: float = 0,
+    target: float = 0,
+    catalyst_type: str = "",
+    catalyst_detail: str = "",
+    float_info: Dict = None,
+    radar_state: str = "",
+    radar_details: str = "",
+    patterns: List[str] = None,
+    room_to_resistance: float = 0,
+    resistance_price: float = 0,
+    mrp: float = 0,
+    ep: float = 0,
+    catalyst_segment: str = "",
+    earnings_info: Dict = None,
+    conference_info: Dict = None,
+    squeeze_info: Dict = None,
+    v7_data: Dict = None,
+):
+    """
+    Alerte enrichie V9 avec contexte complet.
+
+    Format:
+      BUY_STRONG AAPL | Score: 0.85
+      Entry: $150.00 | Stop: $147.50 | Target: $157.50
+      Catalyst: EARNINGS BMO (beat 85% historique)
+      Float: 15.2M | SI: 18.5% | DTC: 3.2
+      Radar: LAUNCHING (vol z=3.2, price vel +0.5%/min)
+      Pattern: VWAP Reclaim + HOD Break
+      Room to resistance: 8.5% ($162.75)
+      MRP: 0.78 | EP: 0.82 (earnings-specific)
+    """
+    patterns = patterns or []
+    float_info = float_info or {}
+    earnings_info = earnings_info or {}
+    conference_info = conference_info or {}
+    squeeze_info = squeeze_info or {}
+    v7_data = v7_data or {}
+
+    # Signal header
+    emoji = get_signal_emoji(signal_type)
+    msg = f"{emoji} *{signal_type}* `{ticker}` | Score: `{monster_score:.2f}`\n"
+
+    # Entry / Stop / Target
+    if entry > 0:
+        parts = [f"Entry: `${entry:.2f}`"]
+        if stop > 0:
+            parts.append(f"Stop: `${stop:.2f}`")
+        if target > 0:
+            parts.append(f"Target: `${target:.2f}`")
+        msg += "\U0001F3AF " + " | ".join(parts) + "\n"
+
+    # Catalyst
+    if catalyst_type:
+        cat_emoji = get_event_emoji(catalyst_type)
+        cat_line = f"{cat_emoji} Catalyst: `{catalyst_type}`"
+        if catalyst_detail:
+            cat_line += f" ({catalyst_detail})"
+        msg += cat_line + "\n"
+
+    # Earnings info
+    if earnings_info:
+        timing = earnings_info.get("timing", "")
+        beat_rate = earnings_info.get("beat_rate", 0)
+        days = earnings_info.get("days_until", "")
+        msg += f"\U0001F4C8 Earnings: `{timing}` J-{days} (beat {beat_rate:.0%})\n"
+
+    # Conference info
+    if conference_info:
+        conf_name = conference_info.get("conference", "")
+        conf_status = conference_info.get("status", "")
+        if conf_name:
+            msg += f"\U0001F3E2 Conference: `{conf_name}` ({conf_status})\n"
+
+    # Float / SI / Squeeze
+    if float_info:
+        float_m = float_info.get("float_shares", 0) / 1_000_000 if float_info.get("float_shares") else 0
+        si_pct = float_info.get("short_pct_float", 0)
+        dtc = float_info.get("days_to_cover", 0)
+        borrow = float_info.get("borrow_status", "")
+
+        parts = []
+        if float_m > 0:
+            parts.append(f"Float: `{float_m:.1f}M`")
+        if si_pct > 0:
+            parts.append(f"SI: `{si_pct:.1f}%`")
+        if dtc > 0:
+            parts.append(f"DTC: `{dtc:.1f}`")
+        if borrow and borrow != "UNKNOWN":
+            parts.append(f"CTB: `{borrow}`")
+
+        if parts:
+            msg += "\U0001F4CA " + " | ".join(parts) + "\n"
+
+    # Squeeze info
+    if squeeze_info and squeeze_info.get("squeeze_score", 0) > 0.3:
+        sq_score = squeeze_info.get("squeeze_score", 0)
+        sq_signals = squeeze_info.get("signals", [])
+        msg += f"\U0001F4A5 Squeeze: `{sq_score:.2f}` ({', '.join(sq_signals[:3])})\n"
+
+    # Radar state
+    if radar_state and radar_state != "DORMANT":
+        msg += f"\U0001F6F0 Radar: `{radar_state}`"
+        if radar_details:
+            msg += f" ({radar_details})"
+        msg += "\n"
+
+    # Patterns
+    if patterns:
+        pattern_str = " + ".join(patterns[:4])
+        msg += f"\U0001F4D0 Pattern: `{pattern_str}`\n"
+
+    # Room to resistance
+    if room_to_resistance > 0:
+        msg += f"\U0001F4CF Room: `{room_to_resistance:.1f}%`"
+        if resistance_price > 0:
+            msg += f" (`${resistance_price:.2f}`)"
+        msg += "\n"
+
+    # MRP / EP
+    if mrp > 0 or ep > 0:
+        mrp_ep = f"\U0001F9E0 MRP: `{mrp:.0f}` | EP: `{ep:.0f}`"
+        if catalyst_segment:
+            mrp_ep += f" ({catalyst_segment})"
+        msg += mrp_ep + "\n"
+
+    # Risk badges from v7_data
+    risk_flags = v7_data.get("risk_flags", {})
+    if risk_flags:
+        badges = []
+        if risk_flags.get("dilution_risk", "LOW") not in ("LOW",):
+            badges.append(f"DIL:{risk_flags['dilution_risk']}")
+        if risk_flags.get("compliance_risk", "LOW") not in ("LOW",):
+            badges.append(f"CMP:{risk_flags['compliance_risk']}")
+        if badges:
+            msg += "\U000026A0 Risk: " + " | ".join(badges) + "\n"
+
+    # Block info
+    block_reasons = v7_data.get("block_reasons", [])
+    if block_reasons:
+        msg += f"\U0001F6AB Blocked: `{', '.join(block_reasons[:3])}`\n"
+
+    send_message(msg)
+
+
+def send_multi_radar_alert(
+    ticker: str,
+    signal_type: str,
+    final_score: float,
+    agreement: str,
+    lead_radar: str,
+    radar_scores: Dict[str, float] = None,
+    active_radars: List[str] = None,
+):
+    """
+    Alerte Multi-Radar V9 — resultat de la confluence des 4 radars.
+    """
+    radar_scores = radar_scores or {}
+    active_radars = active_radars or []
+
+    emoji = get_signal_emoji(signal_type)
+
+    msg = f"{emoji} *MULTI-RADAR* `{ticker}` | `{signal_type}`\n"
+    msg += f"\U0001F3AF Score: `{final_score:.2f}` | Agreement: `{agreement}`\n"
+    msg += f"\U0001F451 Lead: `{lead_radar}` | Active: `{len(active_radars)}/4`\n\n"
+
+    # Radar breakdown
+    radar_emojis = {
+        "flow": "\U0001F30A",      # Wave
+        "catalyst": "\U0001F4A1",   # Light bulb
+        "smart_money": "\U0001F4B0", # Money bag
+        "sentiment": "\U0001F4AC",  # Speech
+    }
+
+    for name in ["flow", "catalyst", "smart_money", "sentiment"]:
+        r_emoji = radar_emojis.get(name, "\U00002B50")
+        score = radar_scores.get(name, 0)
+        active = "\U00002705" if name in active_radars else "\U0000274C"
+        msg += f"  {active} {r_emoji} `{name}`: `{score:.2f}`\n"
+
+    send_message(msg)
+
+
+# ============================
 # Test Connection
 # ============================
 

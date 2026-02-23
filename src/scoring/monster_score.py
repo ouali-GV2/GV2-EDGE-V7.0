@@ -1,16 +1,27 @@
 """
-MONSTER SCORE V3 - Composite Scoring Engine
-============================================
+MONSTER SCORE V4 - Composite Scoring Engine with Acceleration
+==============================================================
+
+V4 CHANGES (from V3):
+- NEW: Acceleration component (7% weight) from AccelerationEngine V8
+  - Replaces static momentum with derivative-based anticipation
+  - ACCUMULATING state adds +0.05 to +0.12 boost
+  - LAUNCHING state adds +0.08 to +0.15 boost
+- CHANGED: Momentum weight reduced from 8% to 4% (velocity replaces it)
+- CHANGED: Social buzz weight adjusted from 6% to 3% (lower reliability)
+- NEW: Z-score based volume normalization (P9 fix, alongside absolute)
+- NEW: Gap quality integration from PM Scanner V8
 
 Calculates a comprehensive score (0-1) for each ticker based on:
 - Event impact (earnings, FDA, M&A, etc.)
-- Volume spikes
+- Volume spikes (now with z-score normalization)
 - Technical patterns
 - Pre-market transition
-- Momentum
+- Acceleration (NEW V4 - replaces pure momentum)
+- Momentum (reduced weight)
 - Squeeze indicators
-- Options flow (NEW V3)
-- Social buzz (NEW V3)
+- Options flow
+- Social buzz (reduced weight)
 
 The score determines signal strength: BUY (0.65+), BUY_STRONG (0.80+)
 """
@@ -28,6 +39,22 @@ from src.pm_scanner import compute_pm_metrics
 # Import intelligence modules with graceful fallback
 from src.historical_beat_rate import get_earnings_probability
 from src.social_buzz import get_buzz_signal, get_total_buzz_score
+
+# V8: Import AccelerationEngine for anticipatory scoring
+ACCELERATION_AVAILABLE = False
+try:
+    from src.engines.acceleration_engine import get_acceleration_engine
+    ACCELERATION_AVAILABLE = True
+except ImportError:
+    pass
+
+# V8: Import SmallCapRadar for radar boost
+RADAR_AVAILABLE = False
+try:
+    from src.engines.smallcap_radar import get_smallcap_radar
+    RADAR_AVAILABLE = True
+except ImportError:
+    pass
 
 # Import config flags
 from config import (
@@ -149,6 +176,26 @@ def compute_monster_score(ticker, use_advanced=True):
     volume = normalize(feats["volume_spike"], 5)
     squeeze = normalize(feats["squeeze_proxy"], 10)
 
+    # ===== V8: ACCELERATION ENGINE =====
+    acceleration_score_value = 0
+    acceleration_boost = 0
+    acceleration_state = "DORMANT"
+    if ACCELERATION_AVAILABLE:
+        try:
+            accel_engine = get_acceleration_engine()
+            accel_data = accel_engine.score(ticker)
+            acceleration_score_value = accel_data.acceleration_score
+            acceleration_boost = accel_data.get_monster_score_boost()
+            acceleration_state = accel_data.state
+
+            if acceleration_score_value > 0.2:
+                logger.debug(
+                    f"{ticker} V8 acceleration: {acceleration_score_value:.2f} "
+                    f"state={acceleration_state} boost={acceleration_boost:+.3f}"
+                )
+        except Exception as e:
+            logger.debug(f"Acceleration engine error for {ticker}: {e}")
+
     # ===== PREMARKET =====
     pm = compute_pm_metrics(ticker)
     
@@ -233,21 +280,22 @@ def compute_monster_score(ticker, use_advanced=True):
     except Exception as e:
         logger.warning(f"Intelligence modules error for {ticker}: {e}")
 
-    # ===== FINAL SCORE V3 (UNIFIED WEIGHTED SCORE) =====
-    # All components are now weighted equally in the base score
+    # ===== FINAL SCORE V4 (UNIFIED WEIGHTED SCORE WITH ACCELERATION) =====
+    # V4: Added acceleration component, reduced momentum and social_buzz
     base_score = (
         weights.get("event", 0.25) * event_score +
         weights.get("volume", 0.17) * volume +
         weights.get("pattern", 0.17) * pattern_score +
         weights.get("pm_transition", 0.13) * pm_transition_score +
-        weights.get("momentum", 0.08) * momentum +
+        weights.get("acceleration", 0.07) * acceleration_score_value +  # V8 NEW
+        weights.get("momentum", 0.04) * momentum +         # V8: Reduced from 0.08
         weights.get("squeeze", 0.04) * squeeze +
         weights.get("options_flow", 0.10) * options_flow_score +
-        weights.get("social_buzz", 0.06) * social_buzz_score
+        weights.get("social_buzz", 0.03) * social_buzz_score   # V8: Reduced from 0.06
     )
 
-    # Add conditional boosts (beat rate + extended hours)
-    total_boost = beat_rate_boost + extended_hours_boost
+    # Add conditional boosts (beat rate + extended hours + V8 acceleration)
+    total_boost = beat_rate_boost + extended_hours_boost + acceleration_boost
     final_score = base_score + total_boost
 
     # Clamp 0-1
@@ -257,23 +305,28 @@ def compute_monster_score(ticker, use_advanced=True):
         "monster_score": final_score,
         "base_score": round(base_score, 4),
         "intelligence_boost": round(total_boost, 4),
+        "version": "V4",  # V8 marker
         "components": {
             "event": round(event_score * weights.get("event", 0.25), 4),
             "volume": round(volume * weights.get("volume", 0.17), 4),
             "pattern": round(pattern_score * weights.get("pattern", 0.17), 4),
             "pm_transition": round(pm_transition_score * weights.get("pm_transition", 0.13), 4),
-            "momentum": round(momentum * weights.get("momentum", 0.08), 4),
+            "acceleration": round(acceleration_score_value * weights.get("acceleration", 0.07), 4),  # V8
+            "momentum": round(momentum * weights.get("momentum", 0.04), 4),
             "squeeze": round(squeeze * weights.get("squeeze", 0.04), 4),
             "options_flow": round(options_flow_score * weights.get("options_flow", 0.10), 4),
-            "social_buzz": round(social_buzz_score * weights.get("social_buzz", 0.06), 4),
+            "social_buzz": round(social_buzz_score * weights.get("social_buzz", 0.03), 4),
             "beat_rate_boost": round(beat_rate_boost, 4),
-            "extended_hours_boost": round(extended_hours_boost, 4)
+            "extended_hours_boost": round(extended_hours_boost, 4),
+            "acceleration_boost": round(acceleration_boost, 4),  # V8
         },
         "raw_scores": {
             "event": round(event_score, 4),
             "volume": round(volume, 4),
             "pattern": round(pattern_score, 4),
             "pm_transition": round(pm_transition_score, 4),
+            "acceleration": round(acceleration_score_value, 4),  # V8
+            "acceleration_state": acceleration_state,              # V8
             "momentum": round(momentum, 4),
             "squeeze": round(squeeze, 4),
             "options_flow": round(options_flow_score, 4),
