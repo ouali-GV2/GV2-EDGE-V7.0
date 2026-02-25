@@ -1,13 +1,181 @@
-# PLAN — Feature Engine : Priorisation Streaming sur get_bars()
+# PLAN — Multi-Radar Async + Feature Engine Streaming
 
 > **Statut** : À faire (refactor de fond)
-> **Priorité** : HAUT
+> **Priorité** : CRITIQUE
 > **Risque** : MOYEN (format DataFrame à adapter, tests obligatoires)
 > **Prérequis** : Tests d'intégration avec IBKR Gateway actif
+> **Dernière mise à jour** : 2026-02-25
 
 ---
 
-## 1. Problème résiduel
+## 0. Multi-Radar V9 — Faux parallélisme (CRITIQUE)
+
+### 0.1 Problème
+
+`asyncio.gather()` (ligne 1193 de `multi_radar_engine.py`) lance les 4 radars en "parallèle", mais **3 des 4 radars contiennent des appels synchrones bloquants** qui gèlent l'event loop. Le résultat : les radars s'exécutent séquentiellement, pas en parallèle.
+
+```
+asyncio.gather(flow, catalyst, smart_money, sentiment)
+
+Ce qui DEVRAIT se passer (parallèle vrai) :
+  t=0ms      t=100ms     t=200ms
+  ├─ FLOW ──────────────────────────┤  (simultané)
+  ├─ CATALYST ──┤                      (simultané)
+  ├─ SMART ────────────────────┤       (simultané)
+  ├─ SENTIMENT ────────────────────┤   (simultané)
+  Total : ~200ms
+
+Ce qui se passe RÉELLEMENT (séquentiel par blocs) :
+  t=0    t=2s        t=5s          t=35s
+  ├ FLOW ┤           │             │
+  │      ├ CATALYST ┤│             │    ← tourne seulement quand Flow libère
+  │      │          ├┤ SMART      ┤│   ← re-bloque avec IBKR options
+  │      │          ││            ├┤ SENTIMENT ──────────────────────┤
+  Total : ~35s+ (pire cas, sans cache)
+```
+
+### 0.2 Diagnostic par radar
+
+#### RADAR A : FLOW — BLOQUANT (~2s)
+
+```
+multi_radar_engine.py ligne 414 :
+  df = fetch_candles(ticker, resolution="1", lookback=30)    ← SYNCHRONE
+        └── ibkr_connector.get_bars()
+              └── ib.sleep(2)  ← bloque l'event loop 2s
+```
+
+Le fix async qu'on a fait dans `main.py` (`await compute_features_async()`) ne s'applique **pas ici** — le multi-radar importe directement `fetch_candles` (synchrone), pas `fetch_candles_async`.
+
+#### RADAR B : CATALYST — OK (non-bloquant)
+
+```
+- get_events_by_ticker()              ← cache mémoire     (0ms)
+- CatalystScorerV3.score_catalysts()  ← calcul CPU        (<1ms)
+- anticipation_engine.watch_early_signals ← dict RAM       (0ms)
+- get_fda_events()                    ← fichier JSON       (<1ms)
+```
+
+Seul radar correctement non-bloquant. Lectures de cache et calculs purs.
+
+#### RADAR C : SMART MONEY — BLOQUANT (~2-5s)
+
+```
+multi_radar_engine.py ligne 664 :
+  get_options_flow_score(ticker)                              ← SYNCHRONE
+    └── IBKROptionsScanner().get_options_summary()
+          └── get_option_chain()
+                ├── ib.qualifyContracts(stock)                ← IBKR blocking
+                └── ib.reqSecDefOptParams(symbol, ...)        ← IBKR blocking
+```
+
+Même problème que Flow : ib_insync bloque l'event loop pendant les requêtes options OPRA.
+
+#### RADAR D : SENTIMENT — BLOQUANT (~15-40s pire cas)
+
+```
+multi_radar_engine.py ligne 805 :
+  get_buzz_signal(ticker)
+    └── get_total_buzz_score(ticker)
+          ├── get_twitter_buzz_grok()    ← API Grok xAI (safe_post, timeout=15s)
+          ├── get_reddit_wsb_buzz()      ← API Reddit PRAW (search 5 subreddits, ~5-10s)
+          └── get_stocktwits_buzz()      ← API StockTwits (safe_get, timeout=10s)
+
+multi_radar_engine.py ligne 838 :
+  get_nlp_sentiment_boost(ticker)
+    └── aggregate_sentiment()            ← SQLite read (rapide, OK)
+```
+
+3 appels HTTP synchrones séquentiels. Pire cas sans cache : 15s + 10s + 10s = **35 secondes**. Normalement atténué par le cache TTL, mais au premier appel pour un ticker c'est un mur.
+
+### 0.3 Corrections nécessaires dans `multi_radar_engine.py`
+
+| Radar | Ligne | Appel bloquant | Fix |
+|---|---|---|---|
+| **FLOW** | 414 | `fetch_candles()` | Remplacer par `await fetch_candles_async()` |
+| **SMART MONEY** | 664 | `get_options_flow_score()` | Wrapper dans `await loop.run_in_executor(_executor, ...)` |
+| **SENTIMENT** | 805 | `get_buzz_signal()` | Wrapper dans `await loop.run_in_executor(_executor, ...)` |
+| **SENTIMENT** | 838 | `get_nlp_sentiment_boost()` | Wrapper dans `await loop.run_in_executor(_executor, ...)` |
+| **CATALYST** | — | Aucun | Pas de changement |
+
+### 0.4 Code des corrections
+
+#### Fix Flow Radar (ligne 412-414)
+
+```python
+# AVANT (bloquant) :
+from src.feature_engine import volume_spike as get_vol_spike, fetch_candles
+df = fetch_candles(ticker, resolution="1", lookback=30)
+
+# APRÈS (non-bloquant) :
+from src.feature_engine import volume_spike as get_vol_spike, fetch_candles_async
+df = await fetch_candles_async(ticker, resolution="1", lookback=30)
+```
+
+#### Fix Smart Money Radar (ligne 662-664)
+
+```python
+# AVANT (bloquant) :
+from src.options_flow_ibkr import get_options_flow_score
+opt_score, opt_details = get_options_flow_score(ticker)
+
+# APRÈS (non-bloquant) :
+from src.options_flow_ibkr import get_options_flow_score
+loop = asyncio.get_event_loop()
+opt_score, opt_details = await loop.run_in_executor(
+    _executor, get_options_flow_score, ticker
+)
+```
+
+#### Fix Sentiment Radar (lignes 805 et 838)
+
+```python
+# AVANT (bloquant) :
+buzz_signal = get_buzz_signal(ticker)
+# ...
+nlp_boost = get_nlp_sentiment_boost(ticker)
+
+# APRÈS (non-bloquant) :
+loop = asyncio.get_event_loop()
+buzz_signal = await loop.run_in_executor(_executor, get_buzz_signal, ticker)
+# ...
+nlp_boost = await loop.run_in_executor(_executor, get_nlp_sentiment_boost, ticker)
+```
+
+#### Infrastructure à ajouter en haut de `multi_radar_engine.py`
+
+```python
+import concurrent.futures
+
+# Thread pool partagé pour les appels bloquants dans les radars
+_executor = concurrent.futures.ThreadPoolExecutor(
+    max_workers=6,
+    thread_name_prefix="radar-io"
+)
+```
+
+### 0.5 Points de vigilance spécifiques au multi-radar
+
+**Semaphore IBKR** : Le Flow Radar et le Smart Money Radar utilisent tous les deux ib_insync. Si les deux tournent en parallèle dans des threads séparés, il faut que le `_ibkr_bar_lock` (semaphore) du `feature_engine.py` protège aussi les appels du Smart Money Radar. Options :
+- Importer et réutiliser `_ibkr_bar_lock` de `feature_engine.py`
+- Ou créer un semaphore global dans `ibkr_connector.py` partagé par tous les modules
+
+**Cache social** : `social_buzz.py` a des caches TTL internes (cache mémoire). Après le premier appel bloquant (~35s), les appels suivants retournent depuis le cache en <1ms. Le problème est surtout au premier scan d'un ticker.
+
+**`_executor` partagé vs séparé** : Utiliser un `ThreadPoolExecutor` séparé pour le multi-radar (6 workers) plutôt que réutiliser celui du `feature_engine.py` (4 workers), pour ne pas créer de contention entre les deux systèmes.
+
+### 0.6 Gain attendu après fix multi-radar
+
+| Métrique | Avant (séquentiel) | Après (parallèle vrai) |
+|---|---|---|
+| Scan 1 ticker (sans cache) | ~35-40s | **~15s** (limité par le plus lent = Grok) |
+| Scan 1 ticker (avec cache) | ~2-5s | **<10ms** (tous les radars en cache) |
+| Scan 200 tickers HOT | ~7000s | **~200s** (parallélisme inter-ticker aussi) |
+| Event loop libre pendant scan | Non | **Oui** (streaming continue) |
+
+---
+
+## 1. Problème résiduel — Feature Engine
 
 Le fix async (`10dd739`) a éliminé le blocage de l'event loop, mais `compute_features_async()` appelle encore `get_bars()` via un thread pool, ce qui prend **~2 secondes par ticker** même pour les tickers déjà streamés en temps réel.
 
@@ -222,9 +390,21 @@ async def test_compute_features_async_buffer_path():
 
 ## 8. Ordre d'implémentation recommandé
 
+### Phase 1 — Multi-Radar async (CRITIQUE, faire en premier)
+
+1. **Ajouter** `_executor = ThreadPoolExecutor(max_workers=6)` en haut de `multi_radar_engine.py`
+2. **Fix Flow Radar** : `fetch_candles()` → `await fetch_candles_async()` (ligne 414)
+3. **Fix Smart Money Radar** : `get_options_flow_score()` → `await run_in_executor()` (ligne 664)
+4. **Fix Sentiment Radar** : `get_buzz_signal()` + `get_nlp_sentiment_boost()` → `await run_in_executor()` (lignes 805, 838)
+5. **Vérifier** le semaphore IBKR : s'assurer que `_ibkr_bar_lock` protège aussi les appels options du Smart Money Radar
+6. **Tester** : vérifier que `asyncio.gather()` produit un vrai parallélisme (mesurer `scan_time_ms` de chaque radar)
+7. **Monitorer** les logs `radar-io-*` en production
+
+### Phase 2 — Feature Engine streaming (HAUT, après Phase 1)
+
 1. **Lire** `src/engines/ticker_state_buffer.py` en entier → noter le format exact des snapshots
 2. **Écrire** `_build_df_from_buffer()` + tests unitaires (sans IBKR)
-3. **Modifier** `fetch_candles_async()` avec la logique de priorité
+3. **Modifier** `fetch_candles_async()` avec la logique de priorité (buffer RAM d'abord)
 4. **Tester** en déployant sur Hetzner avec IBKR Gateway actif
 5. **Monitorer** les logs `feature-io-*` pour détecter des anomalies de thread
 6. **Valider** que les hit rates du daily_audit restent stables (pas de régression features)
