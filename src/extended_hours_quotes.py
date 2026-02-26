@@ -194,41 +194,74 @@ class ExtendedHoursScanner:
             return self._fallback_quote(ticker)
     
     def _fallback_quote(self, ticker: str) -> Optional[ExtendedQuote]:
-        """Fallback using standard IBKR quote"""
-        if not self.ibkr:
-            return None
-        
+        """Fallback quote: IBKR poll → Finnhub WS → None.
+
+        Priority:
+          1. IBKR connector get_quote() — primary (cache hit ~0ms)
+          2. Finnhub WS screener — used when IBKR is disconnected or has no data
+             (pre-market gaps, after-hours, IBKR outage)
+          3. None — no data available
+        """
+        # ── 1. IBKR ───────────────────────────────────────────────────────────
+        if self.ibkr:
+            try:
+                quote = self.ibkr.get_quote(ticker, use_cache=False)
+
+                if quote and quote.get('last', 0) > 0:
+                    session = get_market_session()
+                    prev_close = quote.get('close', 0)
+                    last = quote.get('last', 0)
+                    gap_pct = (last - prev_close) / prev_close if prev_close > 0 else 0
+
+                    return ExtendedQuote(
+                        ticker=ticker,
+                        session=session,
+                        last=last,
+                        bid=quote.get('bid', 0),
+                        ask=quote.get('ask', 0),
+                        volume=quote.get('volume', 0),
+                        extended_volume=quote.get('volume', 0),
+                        prev_close=prev_close,
+                        rth_close=prev_close,
+                        rth_open=quote.get('open', 0),
+                        gap_pct=round(gap_pct, 4),
+                        change_pct=round(gap_pct, 4),
+                        timestamp=datetime.utcnow().isoformat()
+                    )
+            except Exception as e:
+                logger.debug(f"IBKR fallback error {ticker}: {e}")
+
+        # ── 2. Finnhub WS screener ────────────────────────────────────────────
+        # Works during pre-market and after-hours when Finnhub WS is connected.
         try:
-            quote = self.ibkr.get_quote(ticker, use_cache=False)
-            
-            if not quote:
-                return None
-            
-            session = get_market_session()
-            prev_close = quote.get('close', 0)
-            last = quote.get('last', 0)
-            
-            gap_pct = (last - prev_close) / prev_close if prev_close > 0 else 0
-            
-            return ExtendedQuote(
-                ticker=ticker,
-                session=session,
-                last=last,
-                bid=quote.get('bid', 0),
-                ask=quote.get('ask', 0),
-                volume=quote.get('volume', 0),
-                extended_volume=quote.get('volume', 0),
-                prev_close=prev_close,
-                rth_close=prev_close,
-                rth_open=quote.get('open', 0),
-                gap_pct=round(gap_pct, 4),
-                change_pct=round(gap_pct, 4),
-                timestamp=datetime.utcnow().isoformat()
-            )
-            
-        except Exception as e:
-            logger.debug(f"Fallback quote error {ticker}: {e}")
-            return None
+            from src.finnhub_ws_screener import get_finnhub_ws_screener
+            ws = get_finnhub_ws_screener()
+            ws_state = ws.get_ticker_state(ticker)
+
+            if ws_state and ws_state.last_price > 0:
+                session = get_market_session()
+                last = ws_state.last_price
+                volume = int(ws_state.volume_5min)
+
+                return ExtendedQuote(
+                    ticker=ticker,
+                    session=session,
+                    last=last,
+                    bid=0.0,
+                    ask=0.0,
+                    volume=volume,
+                    extended_volume=volume,
+                    prev_close=0.0,
+                    rth_close=0.0,
+                    rth_open=0.0,
+                    gap_pct=0.0,       # prev_close unknown without IBKR
+                    change_pct=0.0,
+                    timestamp=datetime.utcnow().isoformat(),
+                )
+        except Exception as _ws_e:
+            logger.debug(f"Finnhub WS fallback error {ticker}: {_ws_e}")
+
+        return None
     
     def scan_extended_movers(
         self, 

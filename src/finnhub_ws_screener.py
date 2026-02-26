@@ -177,6 +177,9 @@ class FinnhubWSScreener:
         # Volume baselines (loaded from history)
         self._baselines: Dict[str, float] = {}
 
+        # TickerStateBuffer integration — set via connect_buffer()
+        self._buffer = None
+
     # ========================================================================
     # Public API
     # ========================================================================
@@ -204,6 +207,21 @@ class FinnhubWSScreener:
         for ticker, baseline in baselines.items():
             if ticker in self._states:
                 self._states[ticker].volume_baseline = baseline
+
+    def connect_buffer(self, buffer) -> None:
+        """
+        Connect to TickerStateBuffer so every incoming WS trade feeds V8 engines.
+
+        Once connected, each trade received from Finnhub WS is forwarded to the
+        buffer via push_raw() — exactly as IBKR Streaming does in ibkr_streaming.py.
+        This makes AccelerationEngine, FlowRadar, and SmallCapRadar consume Finnhub
+        WS data during all sessions (pre-market, RTH, after-hours).
+
+        Args:
+            buffer: TickerStateBuffer singleton instance
+        """
+        self._buffer = buffer
+        logger.info("FinnhubWSScreener: connected to TickerStateBuffer (V8 engines will consume WS trades)")
 
     async def start(self, tickers: List[str]) -> None:
         """
@@ -376,6 +394,22 @@ class FinnhubWSScreener:
                 state = self._states.get(symbol)
                 if state:
                     state.add_trade(price, volume, timestamp)
+
+                    # Feed TickerStateBuffer so V8 engines (AccelerationEngine,
+                    # FlowRadar, SmallCapRadar) consume Finnhub WS data.
+                    # Mirrors ibkr_streaming.py:_feed_buffer() pattern.
+                    if self._buffer is not None:
+                        try:
+                            from datetime import datetime, timezone
+                            ts = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+                            self._buffer.push_raw(
+                                ticker=symbol,
+                                price=price,
+                                volume=int(volume),
+                                timestamp=ts,
+                            )
+                        except Exception as _buf_err:
+                            logger.debug(f"Buffer feed error for {symbol}: {_buf_err}")
 
                     # Check for events
                     self._check_events(state)

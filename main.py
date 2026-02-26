@@ -318,6 +318,27 @@ async def process_ticker_v7(ticker: str, state: V7State) -> Optional[UnifiedSign
             # Fallback to poll mode (2s latency)
             quote = ibkr.get_quote(ticker, use_cache=True)
 
+        # Finnhub WS fallback — used when IBKR has no data (after-hours, pre-market
+        # gaps, IBKR disconnect). WS accumulates real trades even outside RTH.
+        if quote is None:
+            try:
+                _ws = get_v7_state()._finnhub_ws
+                if _ws is not None:
+                    _ws_state = _ws.get_ticker_state(ticker)
+                    if _ws_state and _ws_state.last_price > 0:
+                        quote = {
+                            "last": _ws_state.last_price,
+                            "volume": int(_ws_state.volume_5min),
+                            "bid": 0.0,
+                            "ask": 0.0,
+                            "high": _ws_state.last_price,
+                            "low": _ws_state.last_price,
+                            "vwap": 0.0,
+                            "_source": "finnhub_ws",
+                        }
+            except Exception as _ws_err:
+                logger.debug(f"Finnhub WS quote error {ticker}: {_ws_err}")
+
         current_price = quote.get("last", 0) if quote else score_data.get("price", 0)
 
         if not current_price or current_price <= 0:
@@ -910,7 +931,19 @@ def run_edge():
                     name="finnhub-ws",
                 )
                 ws_thread.start()
+                state._finnhub_ws = ws_screener          # Store reference so process_ticker_v7 can query it
                 state._finnhub_ws_started = True
+
+                # Connect WS screener to TickerStateBuffer so every Finnhub trade
+                # feeds AccelerationEngine / FlowRadar / SmallCapRadar (V8 engines).
+                # Same pattern as ibkr_streaming.py:_feed_buffer().
+                try:
+                    from src.engines.ticker_state_buffer import get_ticker_state_buffer
+                    ws_screener.connect_buffer(get_ticker_state_buffer())
+                    logger.info("  Finnhub WS: Connected to TickerStateBuffer")
+                except Exception as _buf_e:
+                    logger.debug(f"  Finnhub WS: Buffer connect skipped: {_buf_e}")
+
                 key_label = "FH_A (dedicated)" if _os.environ.get("FINNHUB_KEY_A") else "FH_MAIN (fallback)"
                 logger.info(f"  Finnhub WS: STARTED ({len(initial_tickers)} subs, key={key_label})")
             except Exception as e:
