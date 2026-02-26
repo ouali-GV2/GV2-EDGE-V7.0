@@ -448,11 +448,17 @@ class FinnhubWSScreener:
 _screener_instance: Optional[FinnhubWSScreener] = None
 
 
-def get_finnhub_ws_screener() -> FinnhubWSScreener:
-    """Get singleton FinnhubWSScreener instance."""
+def get_finnhub_ws_screener(api_key: str = None) -> FinnhubWSScreener:
+    """Get singleton FinnhubWSScreener instance.
+
+    Args:
+        api_key: Dedicated WS API key (e.g. from FINNHUB_KEY_A env var).
+                 Only used on the first call to set the key.
+                 Subsequent calls return the existing instance regardless of api_key.
+    """
     global _screener_instance
     if _screener_instance is None:
-        _screener_instance = FinnhubWSScreener()
+        _screener_instance = FinnhubWSScreener(api_key=api_key)
     return _screener_instance
 
 

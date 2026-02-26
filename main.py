@@ -185,6 +185,7 @@ class V7State:
         self._missed_tracker = None
         self._streaming = None
         self._streaming_started = False
+        self._finnhub_ws_started = False
 
     def check_day_rollover(self):
         """Reset daily counters if new day"""
@@ -886,6 +887,34 @@ def run_edge():
                     logger.warning("  IBKR Streaming: FAILED (falling back to poll mode)")
             except Exception as e:
                 logger.warning(f"  IBKR Streaming: ERROR ({e}) — using poll mode")
+
+        # Start Finnhub WebSocket Screener with dedicated FH_A key (WS-only, no REST rotation)
+        # One persistent connection replaces ~3000 REST price-polling calls per cycle.
+        if not state._finnhub_ws_started:
+            try:
+                import os as _os
+                import threading as _threading
+                from src.finnhub_ws_screener import get_finnhub_ws_screener
+                ws_key = _os.environ.get("FINNHUB_KEY_A") or FINNHUB_API_KEY
+                ws_screener = get_finnhub_ws_screener(api_key=ws_key)
+
+                def _run_finnhub_ws():
+                    import asyncio
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    loop.run_until_complete(ws_screener.start(tickers=initial_tickers))
+
+                ws_thread = _threading.Thread(
+                    target=_run_finnhub_ws,
+                    daemon=True,
+                    name="finnhub-ws",
+                )
+                ws_thread.start()
+                state._finnhub_ws_started = True
+                key_label = "FH_A (dedicated)" if _os.environ.get("FINNHUB_KEY_A") else "FH_MAIN (fallback)"
+                logger.info(f"  Finnhub WS: STARTED ({len(initial_tickers)} subs, key={key_label})")
+            except Exception as e:
+                logger.warning(f"  Finnhub WS: FAILED ({e})")
 
         # S3-3 FIX: Initialize TickerStateBuffer baselines from universe data.
         # Without baselines, z-scores default to volume_mean=1 → all tickers show

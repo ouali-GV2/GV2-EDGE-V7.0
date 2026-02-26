@@ -429,14 +429,20 @@ def setup_default_keys():
     registry = get_registry()
 
     # Finnhub keys
+    # FH_A: WebSocket dedicated — NOT in REST rotation (WS_ONLY role)
+    # FH_B → HOT REST (priority 1), FH_C → standard REST (priority 2)
+    # FH_D → batch (priority 3), FH_E → automatic backup (priority 4)
+    # FH_MAIN → legacy fallback for safe_get() calls with hardcoded token (priority 5)
     finnhub_envs = [
-        ("FINNHUB_API_KEY", "FH_MAIN", ["ALL"]),
-        ("FINNHUB_KEY_A", "FH_A", ["HOT_TICKERS", "COMPANY_NEWS"]),
-        ("FINNHUB_KEY_B", "FH_B", ["GLOBAL_NEWS"]),
-        ("FINNHUB_KEY_C", "FH_C", ["BATCH"]),
+        ("FINNHUB_API_KEY", "FH_MAIN", ["ALL"],                          5),
+        ("FINNHUB_KEY_A",   "FH_A",    ["WS_ONLY"],                      0),  # WebSocket only
+        ("FINNHUB_KEY_B",   "FH_B",    ["HOT_TICKERS", "COMPANY_NEWS"],  1),
+        ("FINNHUB_KEY_C",   "FH_C",    ["GLOBAL_NEWS", "PRE_HALT"],      2),
+        ("FINNHUB_KEY_D",   "FH_D",    ["BATCH"],                        3),
+        ("FINNHUB_KEY_E",   "FH_E",    ["BACKUP", "ALL"],                4),
     ]
 
-    for env_var, key_id, roles in finnhub_envs:
+    for env_var, key_id, roles, prio in finnhub_envs:
         key_value = os.environ.get(env_var)
         if key_value:
             registry.register_key(APIKeyConfig(
@@ -445,17 +451,22 @@ def setup_default_keys():
                 key=key_value,
                 tier="free",
                 roles=roles,
-                priority=1 if "HOT" in str(roles) else 2
+                priority=prio
             ))
 
     # Grok/xAI keys
+    # GROK_A → CRITICAL/HOT NLP (priority 1)
+    # GROK_B → STANDARD NLP (priority 2)
+    # GROK_C → BATCH NLP (priority 3)
+    # GROK_MAIN → legacy fallback (priority 4)
     grok_envs = [
-        ("XAI_API_KEY", "GROK_MAIN", ["ALL"]),
-        ("GROK_KEY_A", "GROK_A", ["NLP_CLASSIFY", "CRITICAL"]),
-        ("GROK_KEY_B", "GROK_B", ["BATCH"]),
+        ("XAI_API_KEY",  "GROK_MAIN", ["ALL"],                   4),
+        ("GROK_KEY_A",   "GROK_A",    ["NLP_CLASSIFY", "CRITICAL"], 1),
+        ("GROK_KEY_B",   "GROK_B",    ["NLP_CLASSIFY"],           2),
+        ("GROK_KEY_C",   "GROK_C",    ["BATCH"],                  3),
     ]
 
-    for env_var, key_id, roles in grok_envs:
+    for env_var, key_id, roles, prio in grok_envs:
         key_value = os.environ.get(env_var)
         if key_value:
             registry.register_key(APIKeyConfig(
@@ -464,7 +475,7 @@ def setup_default_keys():
                 key=key_value,
                 tier="starter",
                 roles=roles,
-                priority=1 if "CRITICAL" in roles else 2
+                priority=prio
             ))
 
     logger.info(f"Default keys setup complete: {registry.get_status()}")
