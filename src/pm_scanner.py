@@ -180,7 +180,9 @@ def compute_pm_metrics(ticker):
             "pm_low": pm_low,
             "pm_momentum": pm_range,
             "pm_volume": volume,
-            "pm_liquid": liquid
+            "pm_liquid": liquid,
+            "last": last,                        # S1-9 FIX: pm_transition.py uses "last" key
+            "current": last,                     # Alias for clarity
         }
 
         cache.set(f"pm_{ticker}", metrics)

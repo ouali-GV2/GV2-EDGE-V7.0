@@ -30,6 +30,7 @@ Features:
 
 import asyncio
 import time
+import threading
 from datetime import datetime, timedelta
 from typing import Dict, Optional, Any
 from dataclasses import dataclass
@@ -388,13 +389,15 @@ class APIPoolManager:
 # ============================================================================
 
 _pool_instance = None
+_pool_lock = threading.Lock()  # S4-1 FIX: thread-safe singleton
 
 
 def get_pool_manager() -> APIPoolManager:
     """Get singleton pool manager instance"""
     global _pool_instance
-    if _pool_instance is None:
-        _pool_instance = APIPoolManager()
+    with _pool_lock:
+        if _pool_instance is None:
+            _pool_instance = APIPoolManager()
     return _pool_instance
 
 

@@ -22,6 +22,31 @@ GROK_PING = "https://api.x.ai/v1/models"
 # Track IBKR state for edge-triggered alerts (only alert on change)
 _last_ibkr_state = None
 
+# S4-4 FIX: Per-condition cooldown to prevent Telegram flood.
+# Key = condition label, value = last alert timestamp (epoch seconds).
+_alert_cooldowns: dict = {}
+_COOLDOWN_SECONDS = {
+    "cpu_high": 600,       # max 1 alert / 10 min for CPU spikes
+    "ram_high": 600,
+    "disk_full": 1800,     # max 1 alert / 30 min for disk
+    "finnhub_down": 300,
+    "grok_down": 300,
+    "ibkr_latency": 300,
+}
+_DEFAULT_COOLDOWN = 300  # fallback for unlisted conditions
+
+
+def _cooldown_ok(condition: str) -> bool:
+    """Return True if enough time has elapsed since the last alert for this condition."""
+    import time as _time
+    now = _time.monotonic()
+    last = _alert_cooldowns.get(condition, 0.0)
+    limit = _COOLDOWN_SECONDS.get(condition, _DEFAULT_COOLDOWN)
+    if now - last >= limit:
+        _alert_cooldowns[condition] = now
+        return True
+    return False
+
 
 # ============================
 # System health
@@ -109,19 +134,20 @@ def analyze_health():
 
     stats = get_system_stats()
 
-    if stats["cpu"] > 85:
+    # S4-4 FIX: gate each alert through per-condition cooldown
+    if stats["cpu"] > 85 and _cooldown_ok("cpu_high"):
         send_system_alert(f"High CPU usage: {stats['cpu']}%")
 
-    if stats["ram"] > 85:
+    if stats["ram"] > 85 and _cooldown_ok("ram_high"):
         send_system_alert(f"High RAM usage: {stats['ram']}%")
 
-    if stats["disk"] > 90:
+    if stats["disk"] > 90 and _cooldown_ok("disk_full"):
         send_system_alert(f"Disk almost full: {stats['disk']}%")
 
-    if not check_finnhub():
+    if not check_finnhub() and _cooldown_ok("finnhub_down"):
         send_system_alert("Finnhub API unreachable")
 
-    if not check_grok():
+    if not check_grok() and _cooldown_ok("grok_down"):
         send_system_alert("Grok API unreachable")
 
     # IBKR health check with edge-triggered alerts
@@ -156,8 +182,8 @@ def analyze_health():
 
         _last_ibkr_state = current_state
 
-        # Warn on high latency
-        if ibkr_status["connected"] and ibkr_status["latency_ms"] > 2000:
+        # Warn on high latency (cooldown so we don't flood on sustained high latency)
+        if ibkr_status["connected"] and ibkr_status["latency_ms"] > 2000 and _cooldown_ok("ibkr_latency"):
             send_system_alert(
                 f"IBKR latency high: {ibkr_status['latency_ms']:.0f}ms",
                 level="warning"

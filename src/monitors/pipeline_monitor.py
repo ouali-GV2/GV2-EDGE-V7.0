@@ -35,6 +35,7 @@ import aiohttp
 import sqlite3
 import os
 import json
+import threading
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Callable, Any
 from dataclasses import dataclass, asdict
@@ -627,13 +628,15 @@ class PipelineMonitor:
 # ============================
 
 _monitor_instance = None
+_monitor_lock = threading.Lock()  # S4-1 FIX: thread-safe singleton
 
 
 def get_monitor() -> PipelineMonitor:
     """Get singleton monitor instance"""
     global _monitor_instance
-    if _monitor_instance is None:
-        _monitor_instance = PipelineMonitor()
+    with _monitor_lock:
+        if _monitor_instance is None:
+            _monitor_instance = PipelineMonitor()
     return _monitor_instance
 
 

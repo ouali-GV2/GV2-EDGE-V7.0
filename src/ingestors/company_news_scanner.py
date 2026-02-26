@@ -29,6 +29,7 @@ Architecture:
 import os
 import asyncio
 import aiohttp
+import threading
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional, Set
 from dataclasses import dataclass, field
@@ -379,13 +380,15 @@ class CompanyNewsScanner:
 # ============================
 
 _scanner_instance = None
+_scanner_lock = threading.Lock()  # S4-1 FIX: thread-safe singleton
 
 
 def get_company_scanner() -> CompanyNewsScanner:
     """Get singleton scanner instance"""
     global _scanner_instance
-    if _scanner_instance is None:
-        _scanner_instance = CompanyNewsScanner()
+    with _scanner_lock:
+        if _scanner_instance is None:
+            _scanner_instance = CompanyNewsScanner()
     return _scanner_instance
 
 

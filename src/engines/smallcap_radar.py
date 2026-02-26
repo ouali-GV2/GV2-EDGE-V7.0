@@ -30,7 +30,7 @@ Performance:
 
 import asyncio
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Set, Tuple, Callable
 import logging
 
@@ -270,7 +270,7 @@ class SmallCapRadar:
         """
         import time
         start = time.monotonic()
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         result = RadarScanResult(timestamp=now)
         tickers = self._buffer.get_tracked_tickers()

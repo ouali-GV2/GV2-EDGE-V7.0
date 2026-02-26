@@ -22,8 +22,9 @@ Usage:
         hot_queue.push(g.ticker, TickerPriority.HOT, TriggerReason.EXTERNAL_GAINER)
 """
 
+import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 from dataclasses import dataclass, field
 
@@ -50,7 +51,7 @@ class ExternalGainer:
     price: float
     volume: int
     source: str                  # "ibkr" or "yahoo"
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     market_cap: Optional[float] = None
 
     def is_small_cap(self) -> bool:
@@ -133,7 +134,7 @@ class TopGainersSource:
         # Cache
         _cache.set("top_gainers", filtered)
 
-        self._last_fetch = datetime.utcnow()
+        self._last_fetch = datetime.now(timezone.utc)
         self._fetch_count += 1
 
         logger.info(
@@ -152,7 +153,10 @@ class TopGainersSource:
         """
         Fetch top gainers via IBKR Market Scanner.
 
-        Uses scannerSubscribe for US equities sorted by % change.
+        S4-2 FIX: `ibkr.run_scanner()` did not exist. Use ib-insync's
+        `ScannerSubscription` + `IB.reqScannerSubscription()` directly.
+        The scanner subscription is synchronous in ib-insync when called from
+        a thread that has access to the running event loop.
         """
         gainers = []
 
@@ -164,38 +168,54 @@ class TopGainersSource:
                 logger.debug("IBKR not connected for scanner")
                 return []
 
-            # Request top gainers scan
-            # ScannerSubscription for "TOP_PERC_GAIN" instrument type "STK"
-            scan_results = ibkr.run_scanner(
+            # Import ib-insync types
+            from ib_insync import ScannerSubscription
+
+            sub = ScannerSubscription(
                 instrument="STK",
-                location="STK.US.MAJOR",
-                scan_code="TOP_PERC_GAIN",
-                above_price=0.50,
-                below_price=max_price,
-                above_volume=50000,
-                number_of_rows=50,
+                locationCode="STK.US.MAJOR",
+                scanCode="TOP_PERC_GAIN",
+                abovePrice=0.50,
+                belowPrice=max_price,
+                aboveVolume=50_000,
+                numberOfRows=50,
             )
 
-            if scan_results:
-                for result in scan_results:
-                    ticker = result.get("symbol", "")
-                    change_pct = result.get("change_pct", 0)
-                    price = result.get("last", 0)
-                    volume = result.get("volume", 0)
-                    market_cap = result.get("market_cap")
+            # reqScannerSubscription returns a list of ScanData that populates
+            # asynchronously via the ib-insync event loop. Run in executor thread
+            # and give it 3 s to populate.
+            scan_data = ibkr.ib.reqScannerSubscription(sub)
+            ibkr.ib.sleep(3)  # let the event loop deliver scanner callbacks
+            ibkr.ib.cancelScannerSubscription(scan_data)
 
-                    if ticker and change_pct >= min_change_pct:
-                        gainers.append(ExternalGainer(
-                            ticker=ticker,
-                            change_pct=change_pct,
-                            price=price,
-                            volume=volume,
-                            source="ibkr",
-                            market_cap=market_cap,
-                        ))
+            for item in scan_data:
+                contract = item.contractDetails.contract
+                ticker = contract.symbol
+                if not ticker:
+                    continue
 
-                logger.info(f"IBKR Scanner: {len(gainers)} top gainers")
+                # Fetch live quote for change_pct / volume
+                quote = ibkr.get_quote(ticker)
+                if not quote:
+                    continue
 
+                price = quote.get("last") or quote.get("close") or 0
+                change_pct = quote.get("change_pct", 0)
+                volume = quote.get("volume", 0)
+
+                if change_pct >= min_change_pct and 0.50 <= price <= max_price:
+                    gainers.append(ExternalGainer(
+                        ticker=ticker,
+                        change_pct=round(change_pct, 2),
+                        price=round(price, 2),
+                        volume=int(volume),
+                        source="ibkr",
+                    ))
+
+            logger.info(f"IBKR Scanner: {len(gainers)} top gainers")
+
+        except ImportError:
+            logger.debug("ib-insync ScannerSubscription not available, skipping IBKR scanner")
         except Exception as e:
             logger.debug(f"IBKR scanner error: {e}")
 
@@ -207,80 +227,67 @@ class TopGainersSource:
         max_price: float,
     ) -> List[ExternalGainer]:
         """
-        Fetch top gainers via Yahoo Finance (yfinance).
+        Fetch top gainers via Yahoo Finance.
 
-        Free, no API key needed. Good backup source.
+        S4-2 FIX: Previous code used query1.finance.yahoo.com (deprecated/404) and
+        passed formatted=true which wraps numbers in {raw, fmt} dicts making parsing
+        fragile. Now uses query2 + formatted=false for plain numeric values.
         """
         gainers = []
 
         try:
-            import yfinance as yf
+            # S4-2 FIX: query2 + formatted=false → plain numbers, no dict wrapping
+            query_url = (
+                "https://query2.finance.yahoo.com/v1/finance/screener/predefined/saved"
+                "?formatted=false&lang=en-US&region=US&scrIds=day_gainers&count=50"
+            )
+            # Mimic browser to avoid 403
+            headers = {
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0.0.0 Safari/537.36"
+                ),
+                "Accept": "application/json",
+            }
+            r = safe_get(query_url, timeout=15, headers=headers)
 
-            # Yahoo Finance day gainers
-            # Use the screener for US small cap gainers
-            tickers_data = yf.Tickers(
-                " ".join([])  # Empty — we use the screener instead
+            if r.status_code != 200:
+                logger.debug(f"Yahoo screener HTTP {r.status_code}")
+                return gainers
+
+            data = r.json()
+            quotes = (
+                data.get("finance", {})
+                .get("result", [{}])[0]
+                .get("quotes", [])
             )
 
-            # Alternative: scrape Yahoo Finance gainers page
-            url = "https://finance.yahoo.com/gainers"
-            try:
-                r = safe_get(url, timeout=10)
-                # Parse response for ticker data
-                # Yahoo returns HTML, we need to extract the data
-                # For simplicity, use the query API instead
-                query_url = (
-                    "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved"
-                    "?formatted=true&lang=en-US&region=US&scrIds=day_gainers&count=50"
-                )
-                r = safe_get(query_url, timeout=10)
-                data = r.json()
+            for quote in quotes:
+                ticker = quote.get("symbol", "")
+                # formatted=false → plain float, no dict wrapping
+                change_pct = float(quote.get("regularMarketChangePercent") or 0)
+                price = float(quote.get("regularMarketPrice") or 0)
+                volume = int(quote.get("regularMarketVolume") or 0)
+                market_cap = quote.get("marketCap")
+                market_cap = float(market_cap) if market_cap else None
 
-                quotes = (
-                    data.get("finance", {})
-                    .get("result", [{}])[0]
-                    .get("quotes", [])
-                )
+                if (
+                    ticker
+                    and change_pct >= min_change_pct
+                    and 0.50 <= price <= max_price
+                ):
+                    gainers.append(ExternalGainer(
+                        ticker=ticker,
+                        change_pct=round(change_pct, 2),
+                        price=round(price, 2),
+                        volume=volume,
+                        source="yahoo",
+                        market_cap=market_cap,
+                    ))
 
-                for quote in quotes:
-                    ticker = quote.get("symbol", "")
-                    change_pct = quote.get("regularMarketChangePercent", {})
-                    if isinstance(change_pct, dict):
-                        change_pct = change_pct.get("raw", 0)
+            logger.info(f"Yahoo Finance: {len(gainers)} top gainers")
 
-                    price = quote.get("regularMarketPrice", {})
-                    if isinstance(price, dict):
-                        price = price.get("raw", 0)
-
-                    volume = quote.get("regularMarketVolume", {})
-                    if isinstance(volume, dict):
-                        volume = volume.get("raw", 0)
-
-                    market_cap = quote.get("marketCap", {})
-                    if isinstance(market_cap, dict):
-                        market_cap = market_cap.get("raw", 0)
-
-                    if (
-                        ticker
-                        and change_pct >= min_change_pct
-                        and 0.50 <= price <= max_price
-                    ):
-                        gainers.append(ExternalGainer(
-                            ticker=ticker,
-                            change_pct=round(change_pct, 2),
-                            price=round(price, 2),
-                            volume=int(volume),
-                            source="yahoo",
-                            market_cap=market_cap if market_cap else None,
-                        ))
-
-                logger.info(f"Yahoo Finance: {len(gainers)} top gainers")
-
-            except Exception as e:
-                logger.debug(f"Yahoo screener query error: {e}")
-
-        except ImportError:
-            logger.debug("yfinance not installed, skipping Yahoo source")
         except Exception as e:
             logger.debug(f"Yahoo gainers error: {e}")
 
@@ -300,13 +307,15 @@ class TopGainersSource:
 # ============================================================================
 
 _source_instance: Optional[TopGainersSource] = None
+_source_lock = threading.Lock()  # S4-1 FIX: thread-safe singleton
 
 
 def get_top_gainers_source() -> TopGainersSource:
     """Get singleton TopGainersSource instance."""
     global _source_instance
-    if _source_instance is None:
-        _source_instance = TopGainersSource()
+    with _source_lock:  # S4-1 FIX
+        if _source_instance is None:
+            _source_instance = TopGainersSource()
     return _source_instance
 
 

@@ -8,9 +8,10 @@ pour analyse historique et audit lead time.
 Base de données SQLite simple et robuste.
 """
 
+import json
 import sqlite3
 import os
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import pandas as pd
 from utils.logger import get_logger
 
@@ -26,8 +27,13 @@ DB_PATH = "data/signals_history.db"
 def init_db():
     """Create signals table if not exists"""
     os.makedirs("data", exist_ok=True)
-    
-    conn = sqlite3.connect(DB_PATH)
+
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    # S2-5 FIX: WAL mode — allows concurrent reads while a write is in progress.
+    # Default journal mode (DELETE) blocks all readers during writes.
+    # WAL is safe for single-process multi-thread use (main + Streamlit dashboard).
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")  # Slightly faster, still crash-safe with WAL
     cursor = conn.cursor()
     
     cursor.execute("""
@@ -80,7 +86,7 @@ def log_signal(signal_data):
         signal_data: dict with signal information
     """
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
         
         cursor.execute("""
@@ -91,7 +97,7 @@ def log_signal(signal_data):
                 entry_price, stop_loss, shares, metadata
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            datetime.utcnow().isoformat(),
+            datetime.now(timezone.utc).isoformat(),
             signal_data.get("ticker", ""),
             signal_data.get("signal", ""),
             signal_data.get("monster_score", 0),
@@ -105,7 +111,7 @@ def log_signal(signal_data):
             signal_data.get("entry", 0),
             signal_data.get("stop", 0),
             signal_data.get("shares", 0),
-            str(signal_data.get("metadata", {}))
+            json.dumps(signal_data.get("metadata", {}))
         ))
         
         conn.commit()
@@ -137,7 +143,7 @@ def get_signals_for_period(start_date, end_date, signal_type=None):
         DataFrame with signals
     """
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         
         if isinstance(start_date, datetime):
             start_date = start_date.isoformat()
@@ -177,7 +183,7 @@ def get_signal_by_ticker_and_date(ticker, date):
         dict with signal data or None
     """
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
         
         if isinstance(date, datetime):
@@ -215,7 +221,7 @@ def get_signal_by_ticker_and_date(ticker, date):
 def get_all_signals_for_ticker(ticker, limit=100):
     """Get all signals for a ticker (most recent first)"""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         
         df = pd.read_sql("""
             SELECT * FROM signals 
@@ -240,9 +246,9 @@ def get_all_signals_for_ticker(ticker, limit=100):
 def get_signal_stats(days_back=30):
     """Get signal statistics for recent period"""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         
-        start_date = (datetime.utcnow() - pd.Timedelta(days=days_back)).isoformat()
+        start_date = (datetime.now(timezone.utc) - pd.Timedelta(days=days_back)).isoformat()
         
         stats = {}
         
@@ -289,16 +295,58 @@ def get_signal_stats(days_back=30):
 
 
 # ============================
+# Signal History (for weight_optimizer)
+# ============================
+
+def get_signal_history(days_back: int = 30, signal_types: list = None) -> pd.DataFrame:
+    """
+    Get signal history for a period.
+
+    Required by weight_optimizer.py for weekly weight optimization.
+
+    Args:
+        days_back: How many days back to retrieve
+        signal_types: Filter by signal types (e.g. ["BUY", "BUY_STRONG"])
+
+    Returns:
+        DataFrame with columns: timestamp, ticker, signal_type, monster_score,
+        confidence, entry_price, stop_loss, shares, metadata
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+
+        start_date = (datetime.now(timezone.utc) - timedelta(days=days_back)).isoformat()
+
+        query = "SELECT * FROM signals WHERE timestamp >= ?"
+        params = [start_date]
+
+        if signal_types:
+            placeholders = ", ".join("?" * len(signal_types))
+            query += f" AND signal_type IN ({placeholders})"
+            params.extend(signal_types)
+
+        query += " ORDER BY timestamp DESC"
+
+        df = pd.read_sql(query, conn, params=params)
+        conn.close()
+        return df
+
+    except Exception as e:
+        logger.error(f"Failed to get signal history: {e}")
+        return pd.DataFrame()
+
+
+# ============================
 # Cleanup
 # ============================
 
 def cleanup_old_signals(days_to_keep=90):
     """Remove signals older than X days"""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
         
-        cutoff_date = (datetime.utcnow() - pd.Timedelta(days=days_to_keep)).isoformat()
+        cutoff_date = (datetime.now(timezone.utc) - pd.Timedelta(days=days_to_keep)).isoformat()
         
         cursor.execute("""
             DELETE FROM signals 

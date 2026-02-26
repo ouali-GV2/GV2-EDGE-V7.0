@@ -32,6 +32,7 @@ Workaround:
 """
 
 import time
+import threading
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
@@ -171,7 +172,7 @@ class IBKROptionsScanner:
                                 
                                 # Request market data
                                 self.ib.reqMktData(opt, '', False, False)
-                                time.sleep(0.1)
+                                time.sleep(0.1)  # OK: runs in executor thread, not event loop
                                 
                                 ticker_data = self.ib.ticker(opt)
                                 
@@ -372,16 +373,36 @@ def detect_options_signals(ticker: str, summary: Dict) -> List[OptionsFlowSignal
 
 
 # ============================
+# SINGLETON
+# ============================
+
+# S2-6 FIX: IBKROptionsScanner singleton — avoids creating a new IBKR connection
+# on every get_options_flow_score() call (called once per ticker per cycle).
+# Before: N tickers × new IBKROptionsScanner() = N connection attempts.
+# After:  one shared scanner instance reused across all tickers.
+_scanner_singleton: Optional["IBKROptionsScanner"] = None
+_scanner_lock = threading.Lock()  # S4-1 FIX: thread-safe singleton
+
+
+def _get_options_scanner() -> "IBKROptionsScanner":
+    global _scanner_singleton
+    with _scanner_lock:
+        if _scanner_singleton is None:
+            _scanner_singleton = IBKROptionsScanner()
+    return _scanner_singleton
+
+
+# ============================
 # MAIN SCANNER
 # ============================
 
 def scan_options_flow(tickers: List[str]) -> Dict[str, List[OptionsFlowSignal]]:
     """
     Scan multiple tickers for options flow signals
-    
+
     Returns: {ticker: [signals]}
     """
-    scanner = IBKROptionsScanner()
+    scanner = _get_options_scanner()
     
     if not scanner.ib:
         logger.warning("IBKR not available for options scanning")
@@ -413,8 +434,6 @@ def scan_options_flow(tickers: List[str]) -> Dict[str, List[OptionsFlowSignal]]:
                             f"(score: {sig.score:.2f})"
                         )
             
-            time.sleep(0.5)  # Rate limiting
-            
         except Exception as e:
             logger.debug(f"Options scan error {ticker}: {e}")
             continue
@@ -426,12 +445,12 @@ def scan_options_flow(tickers: List[str]) -> Dict[str, List[OptionsFlowSignal]]:
 
 def get_options_flow_score(ticker: str) -> Tuple[float, Dict]:
     """
-    Get combined options flow score for a single ticker
-    
+    Get combined options flow score for a single ticker.
+
     Returns: (score, details)
     """
-    scanner = IBKROptionsScanner()
-    
+    scanner = _get_options_scanner()  # S2-6: Use singleton
+
     if not scanner.ib:
         return 0.0, {}
     

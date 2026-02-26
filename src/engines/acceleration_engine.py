@@ -27,7 +27,7 @@ Key Insight:
 
 import asyncio
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Set, Tuple
 import logging
 
@@ -242,7 +242,7 @@ class AccelerationEngine:
         """
         alerts = []
         tickers = self._buffer.get_tracked_tickers()
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         for ticker in tickers:
             ds = self._buffer.get_derivative_state(ticker)

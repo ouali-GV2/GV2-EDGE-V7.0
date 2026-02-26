@@ -27,6 +27,8 @@ Rôle:
 """
 
 import asyncio
+import concurrent.futures
+import threading
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Set
 from dataclasses import dataclass
@@ -288,11 +290,11 @@ class InsiderBoostEngine:
         if result.transactions:
             recent_buys = [
                 tx for tx in result.transactions
-                if tx.transaction_type == "BUY"
+                if tx.transaction_code == "P"  # SEC Form 4: P=Purchase
             ]
             if recent_buys:
-                most_recent = max(recent_buys, key=lambda x: x.filed_date)
-                age_hours = (datetime.utcnow() - most_recent.filed_date).total_seconds() / 3600
+                most_recent = max(recent_buys, key=lambda x: x.transaction_date)
+                age_hours = (datetime.utcnow() - most_recent.transaction_date).total_seconds() / 3600
 
                 decay = 1.0
                 for threshold, factor in sorted(TIME_DECAY.items()):
@@ -403,14 +405,15 @@ def detect_insider_cluster(ticker: str, days: int = 7, min_insiders: int = 3) ->
         engine = get_insider_engine()
 
         # Utiliser analyze() existant pour recuperer les transactions
+        # S2-4 FIX: run_until_complete() crashes when the event loop is already running
+        # (called from main.py async context). asyncio.run() also fails in that case.
+        # Fix: run asyncio.run() in a dedicated thread that has its own event loop.
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # Si deja dans un event loop, utiliser le cache
-                result = None
-            else:
-                result = loop.run_until_complete(engine.analyze(ticker, hours_back=days * 24))
-        except RuntimeError:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _exec:
+                result = _exec.submit(
+                    asyncio.run, engine.analyze(ticker, hours_back=days * 24)
+                ).result(timeout=15)
+        except Exception:
             result = None
 
         if not result or result.buy_count == 0:
@@ -508,15 +511,17 @@ def detect_insider_cluster(ticker: str, days: int = 7, min_insiders: int = 3) ->
 # ============================
 
 _engine_instance = None
+_engine_lock = threading.Lock()  # S4-1 FIX: thread-safe singleton
 
 
 def get_insider_engine(universe: Set[str] = None) -> InsiderBoostEngine:
     """Get singleton engine instance"""
     global _engine_instance
-    if _engine_instance is None:
-        _engine_instance = InsiderBoostEngine(universe)
-    elif universe:
-        _engine_instance.set_universe(universe)
+    with _engine_lock:
+        if _engine_instance is None:
+            _engine_instance = InsiderBoostEngine(universe)
+        elif universe:
+            _engine_instance.set_universe(universe)
     return _engine_instance
 
 

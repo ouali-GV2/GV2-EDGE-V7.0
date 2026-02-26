@@ -36,6 +36,7 @@ Architecture:
 """
 
 import asyncio
+import concurrent.futures
 import logging
 import time
 from dataclasses import dataclass, field
@@ -44,6 +45,16 @@ from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
 from utils.logger import get_logger
+
+# S1-11 FIX: Thread pool for blocking I/O inside async radar coroutines.
+# Without this, asyncio.gather() runs sequentially because synchronous IBKR/
+# Reddit/Grok calls block the event loop. With run_in_executor(), each radar
+# truly runs in parallel (~200ms total vs ~35s serial).
+# Separate from feature_engine's _executor (4 workers) to avoid contention.
+_executor = concurrent.futures.ThreadPoolExecutor(
+    max_workers=6,
+    thread_name_prefix="radar-io"
+)
 
 logger = get_logger("MULTI_RADAR")
 
@@ -408,10 +419,13 @@ class FlowRadar:
             logger.debug(f"FlowRadar radar error {ticker}: {e}")
 
         # --- 4. Feature Engine — Volume ratio rapide (10% du score flow) ---
+        # S1-11 FIX: fetch_candles() was synchronous (ib.sleep(2) inside) which blocked
+        # the event loop and made asyncio.gather() run serially (~2s here alone).
+        # Now uses fetch_candles_async() which delegates to _executor thread pool.
         try:
-            from src.feature_engine import volume_spike as get_vol_spike, fetch_candles
-            # Utilise le cache existant (TTL 30s dans feature_engine)
-            df = fetch_candles(ticker, resolution="1", lookback=30)
+            from src.feature_engine import volume_spike as get_vol_spike, fetch_candles_async
+            loop = asyncio.get_event_loop()
+            df = await fetch_candles_async(ticker, resolution="1", lookback=30)
             if df is not None and len(df) >= 5:
                 vol_raw = get_vol_spike(df)
                 vol_norm = min(1.0, vol_raw / 5.0)
@@ -659,9 +673,15 @@ class SmartMoneyRadar:
         min_score = sensitivity.get("min_score", 0.35)
 
         # --- 1. Options Flow IBKR (60% du score smart money) ---
+        # S1-11 FIX: get_options_flow_score() calls ib.qualifyContracts() and
+        # ib.reqSecDefOptParams() which block the event loop for 2-5s.
+        # Offloaded to _executor thread pool so asyncio.gather() stays parallel.
         try:
             from src.options_flow_ibkr import get_options_flow_score
-            opt_score, opt_details = get_options_flow_score(ticker)
+            loop = asyncio.get_event_loop()
+            opt_score, opt_details = await loop.run_in_executor(
+                _executor, get_options_flow_score, ticker
+            )
             if opt_score and opt_score > 0:
                 score += min(1.0, opt_score) * 0.60
                 confidence += 0.40
@@ -800,9 +820,13 @@ class SentimentRadar:
         min_score = sensitivity.get("min_score", 0.20)
 
         # --- 1. Social Buzz — Reddit + StockTwits (35% du score sentiment) ---
+        # S1-11 FIX: get_buzz_signal() makes 3 serial HTTP calls (Grok+Reddit+StockTwits)
+        # blocking the event loop for up to 35s on cold cache.
+        # Offloaded to _executor so asyncio.gather() runs all 4 radars in parallel.
         try:
             from src.social_buzz import get_buzz_signal, detect_buzz_spike
-            buzz_signal = get_buzz_signal(ticker)
+            loop = asyncio.get_event_loop()
+            buzz_signal = await loop.run_in_executor(_executor, get_buzz_signal, ticker)
             if buzz_signal:
                 buzz_score = buzz_signal.get("combined_score", 0) if isinstance(buzz_signal, dict) else getattr(buzz_signal, 'combined_score', 0)
                 if buzz_score and buzz_score > 0:
@@ -833,9 +857,12 @@ class SentimentRadar:
             logger.debug(f"SentimentRadar buzz error {ticker}: {e}")
 
         # --- 2. NLP Sentiment — Grok analysis (25% du score sentiment) ---
+        # S1-11 FIX: get_nlp_sentiment_boost() calls Grok API (HTTP, up to 15s).
+        # Offloaded to _executor.
         try:
             from src.nlp_enrichi import get_nlp_sentiment_boost
-            nlp_boost = get_nlp_sentiment_boost(ticker)
+            loop = asyncio.get_event_loop()
+            nlp_boost = await loop.run_in_executor(_executor, get_nlp_sentiment_boost, ticker)
             if nlp_boost and nlp_boost != 0:
                 # nlp_boost est un multiplicateur (0.7 = bearish, 1.4 = bullish)
                 # Convertir en score 0-1: (boost - 0.7) / (1.4 - 0.7) = normalise
@@ -1266,9 +1293,13 @@ class MultiRadarEngine:
         """
         Scan batch de tickers.
 
-        Les tickers sont traites sequentiellement pour eviter
-        de surcharger les APIs, mais les 4 radars de chaque ticker
-        tournent en parallele.
+        S2-1 FIX: Tickers scannés en parallèle via asyncio.gather() avec un
+        sémaphore de concurrence (max 5 simultanés). Chaque scan_ticker() lance
+        déjà 4 radars en parallèle via asyncio.gather() — le semaphore protège
+        contre la surcharge des APIs (20 workers max actifs simultanément).
+
+        Avant: séquentiel → N tickers × ~200ms = N×200ms total
+        Après: parallèle  → ceil(N/5) × ~200ms = ~5× plus rapide
 
         Args:
             tickers: liste de symboles
@@ -1280,13 +1311,19 @@ class MultiRadarEngine:
         if session is None:
             session = self.session_adapter.get_sub_session()
 
-        results = []
-        for ticker in tickers:
-            try:
-                signal = await self.scan_ticker(ticker, session)
-                results.append(signal)
-            except Exception as e:
-                logger.error(f"scan_batch error {ticker}: {e}")
+        # S2-1: Semaphore to cap simultaneous ticker scans (5 tickers × 4 radars = 20 executor slots)
+        sem = asyncio.Semaphore(5)
+
+        async def scan_guarded(ticker: str):
+            async with sem:
+                try:
+                    return await self.scan_ticker(ticker, session)
+                except Exception as e:
+                    logger.error(f"scan_batch error {ticker}: {e}")
+                    return None
+
+        raw = await asyncio.gather(*[scan_guarded(t) for t in tickers])
+        results = [r for r in raw if r is not None]
 
         # Trier par score descendant
         results.sort(key=lambda s: s.final_score, reverse=True)

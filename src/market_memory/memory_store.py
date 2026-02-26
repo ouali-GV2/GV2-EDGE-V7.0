@@ -225,7 +225,7 @@ class SQLiteStorage(BaseStorage):
 
     def _init_db(self) -> None:
         """Initialize database schema."""
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS records (
                     collection TEXT NOT NULL,
@@ -240,12 +240,16 @@ class SQLiteStorage(BaseStorage):
                 CREATE INDEX IF NOT EXISTS idx_collection
                 ON records(collection)
             """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_collection_updated
+                ON records(collection, updated_at)
+            """)
             conn.commit()
 
     def save(self, collection: str, key: str, data: Dict) -> bool:
         """Save a record."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
                 now = datetime.now().isoformat()
                 conn.execute("""
                     INSERT OR REPLACE INTO records
@@ -261,7 +265,7 @@ class SQLiteStorage(BaseStorage):
     def load(self, collection: str, key: str) -> Optional[Dict]:
         """Load a record."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
                 cursor = conn.execute("""
                     SELECT data FROM records
                     WHERE collection = ? AND key = ?
@@ -276,7 +280,7 @@ class SQLiteStorage(BaseStorage):
     def load_all(self, collection: str) -> List[Dict]:
         """Load all records."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
                 cursor = conn.execute("""
                     SELECT data FROM records WHERE collection = ?
                 """, (collection,))
@@ -288,7 +292,7 @@ class SQLiteStorage(BaseStorage):
     def delete(self, collection: str, key: str) -> bool:
         """Delete a record."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
                 conn.execute("""
                     DELETE FROM records WHERE collection = ? AND key = ?
                 """, (collection, key))
@@ -304,21 +308,39 @@ class SQLiteStorage(BaseStorage):
         filters: Optional[Dict] = None,
         limit: int = 1000
     ) -> List[Dict]:
-        """Query with filters (limited - loads all then filters)."""
-        records = self.load_all(collection)
+        """S5-7 FIX: Query with SQL-native json_extract filtering (O(log n) vs O(n))."""
+        try:
+            with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
+                if not filters:
+                    cursor = conn.execute(
+                        "SELECT data FROM records WHERE collection = ? LIMIT ?",
+                        (collection, limit)
+                    )
+                    return [json.loads(row[0]) for row in cursor.fetchall()]
 
-        if filters:
-            records = [
-                r for r in records
-                if all(r.get(k) == v for k, v in filters.items())
-            ]
+                # Build WHERE using json_extract for each JSON field filter
+                where_parts = ["collection = ?"]
+                params: list = [collection]
+                for key, value in filters.items():
+                    where_parts.append(f"json_extract(data, '$.{key}') = ?")
+                    params.append(value)
+                params.append(limit)
 
-        return records[:limit]
+                sql = (
+                    "SELECT data FROM records WHERE "
+                    + " AND ".join(where_parts)
+                    + " LIMIT ?"
+                )
+                cursor = conn.execute(sql, params)
+                return [json.loads(row[0]) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"SQLite query error: {e}")
+            return []
 
     def count(self, collection: str) -> int:
         """Count records."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
                 cursor = conn.execute("""
                     SELECT COUNT(*) FROM records WHERE collection = ?
                 """, (collection,))
@@ -331,7 +353,7 @@ class SQLiteStorage(BaseStorage):
         """Clear collection."""
         count = self.count(collection)
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
                 conn.execute("""
                     DELETE FROM records WHERE collection = ?
                 """, (collection,))

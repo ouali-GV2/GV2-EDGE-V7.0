@@ -36,6 +36,7 @@ Objectif: Entrer AVANT que le mover soit visible par tous
 import os
 import json
 import time
+import concurrent.futures
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Set, Tuple
 from dataclasses import dataclass, asdict
@@ -248,8 +249,9 @@ def _scan_with_ibkr(tickers: List[str], ibkr) -> List[Anomaly]:
             if anomaly:
                 anomalies.append(anomaly)
             
-            time.sleep(0.05)  # Small delay
-            
+            # S2-2 FIX: Removed time.sleep(0.05) — IBKR uses cached quotes (use_cache=True),
+            # so no rate limit needed here. Sleep was blocking event loop when called from async.
+
         except Exception as e:
             logger.debug(f"IBKR scan error {ticker}: {e}")
             continue
@@ -285,8 +287,9 @@ def _scan_with_finnhub(tickers: List[str]) -> List[Anomaly]:
             if anomaly:
                 anomalies.append(anomaly)
             
-            time.sleep(0.2)  # Finnhub rate limit
-            
+            # S2-2 FIX: Removed time.sleep(0.2) — safe_get() in api_guard already applies
+            # retry/backoff; explicit sleep here blocks the caller's event loop unnecessarily.
+
         except Exception as e:
             logger.debug(f"Finnhub scan error {ticker}: {e}")
             continue
@@ -398,15 +401,14 @@ def analyze_with_real_sources(tickers: List[str]) -> List[CatalystEvent]:
             return [f for f in filings if f.ticker in tickers]
 
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # If already in async context, create task
-                sec_filings = []
-            else:
-                sec_filings = loop.run_until_complete(fetch_sec_catalysts())
-        except RuntimeError:
-            # No event loop, create new one
-            sec_filings = asyncio.run(fetch_sec_catalysts())
+            # S2-3 FIX: run_until_complete() crashes when called inside a running event loop
+            # (RuntimeError: This event loop is already running). asyncio.run() also fails.
+            # Solution: run the coroutine in a dedicated thread with its own event loop.
+            # This works regardless of whether we're inside an async context or not.
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _exec:
+                sec_filings = _exec.submit(asyncio.run, fetch_sec_catalysts()).result(timeout=30)
+        except Exception:
+            sec_filings = []
 
         # Convert SEC filings to CatalystEvents
         for filing in sec_filings:
@@ -436,13 +438,11 @@ def analyze_with_real_sources(tickers: List[str]) -> List[CatalystEvent]:
             return results
 
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                company_results = []
-            else:
-                company_results = loop.run_until_complete(fetch_company_news())
-        except RuntimeError:
-            company_results = asyncio.run(fetch_company_news())
+            # S2-3 FIX: Same pattern as fetch_sec_catalysts above.
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _exec:
+                company_results = _exec.submit(asyncio.run, fetch_company_news()).result(timeout=60)
+        except Exception:
+            company_results = []
 
         # Convert company news to CatalystEvents
         for ticker, result in company_results:
@@ -519,7 +519,7 @@ def _fallback_finnhub_news(tickers: List[str]) -> List[CatalystEvent]:
                     timestamp=datetime.utcnow().isoformat()
                 ))
 
-            time.sleep(0.5)
+            # S2-2 FIX: Removed time.sleep(0.5) — safe_get() handles rate limiting.
 
         except Exception as e:
             logger.debug(f"Finnhub fallback error {ticker}: {e}")

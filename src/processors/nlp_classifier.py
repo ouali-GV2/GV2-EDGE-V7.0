@@ -22,6 +22,7 @@ import os
 import json
 import hashlib
 import asyncio
+import threading
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, asdict
@@ -224,7 +225,7 @@ class ClassificationCache:
     def _init_db(self):
         """Initialize cache database"""
         os.makedirs("data", exist_ok=True)
-        self.conn = sqlite3.connect(NLP_CACHE_DB)
+        self.conn = sqlite3.connect(NLP_CACHE_DB, check_same_thread=False)
         self.conn.execute("""
             CREATE TABLE IF NOT EXISTS classification_cache (
                 hash TEXT PRIMARY KEY,
@@ -510,12 +511,14 @@ class NLPClassifier:
 # ============================
 
 _classifier_instance = None
+_classifier_lock = threading.Lock()  # S4-1 FIX: thread-safe singleton
 
 def get_classifier() -> NLPClassifier:
     """Get singleton classifier instance"""
     global _classifier_instance
-    if _classifier_instance is None:
-        _classifier_instance = NLPClassifier()
+    with _classifier_lock:
+        if _classifier_instance is None:
+            _classifier_instance = NLPClassifier()
     return _classifier_instance
 
 

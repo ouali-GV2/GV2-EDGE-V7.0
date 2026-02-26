@@ -24,6 +24,7 @@ Limites gérées:
 - Broker connection status
 """
 
+import threading
 from datetime import datetime, date
 from typing import Dict, List, Optional, Any, Set
 from dataclasses import dataclass, field
@@ -464,13 +465,15 @@ class ExecutionGate:
 # ============================================================================
 
 _gate_instance = None
+_gate_lock = threading.Lock()  # S4-1 FIX: thread-safe singleton
 
 
 def get_execution_gate() -> ExecutionGate:
     """Get singleton gate instance"""
     global _gate_instance
-    if _gate_instance is None:
-        _gate_instance = ExecutionGate()
+    with _gate_lock:
+        if _gate_instance is None:
+            _gate_instance = ExecutionGate()
     return _gate_instance
 
 

@@ -22,7 +22,8 @@ Responsabilités:
 - Risk/Reward calculation
 """
 
-from datetime import datetime, timedelta
+import threading
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional, List, Any
 from dataclasses import dataclass
 
@@ -240,7 +241,7 @@ class OrderComputer:
             risk_reward_ratio=risk_reward,
             confidence=signal.monster_score,
             timing_strategy=timing,
-            valid_until=datetime.utcnow() + timedelta(hours=1),
+            valid_until=datetime.now(timezone.utc) + timedelta(hours=1),
             rationale=rationale
         )
 
@@ -481,13 +482,15 @@ class OrderComputer:
 # ============================================================================
 
 _computer_instance = None
+_computer_lock = threading.Lock()  # S4-1 FIX: thread-safe singleton
 
 
 def get_order_computer() -> OrderComputer:
     """Get singleton computer instance"""
     global _computer_instance
-    if _computer_instance is None:
-        _computer_instance = OrderComputer()
+    with _computer_lock:
+        if _computer_instance is None:
+            _computer_instance = OrderComputer()
     return _computer_instance
 
 

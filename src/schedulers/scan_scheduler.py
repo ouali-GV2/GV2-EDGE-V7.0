@@ -22,6 +22,7 @@ Architecture:
 """
 
 import asyncio
+import threading
 from datetime import datetime, time, timedelta
 from typing import Callable, Dict, List, Optional, Set, Any
 from dataclasses import dataclass
@@ -485,15 +486,17 @@ class ScanScheduler:
 # ============================
 
 _scheduler_instance = None
+_scheduler_lock = threading.Lock()  # S4-1 FIX: thread-safe singleton
 
 
 def get_scheduler(universe: Set[str] = None) -> ScanScheduler:
     """Get singleton scheduler instance"""
     global _scheduler_instance
-    if _scheduler_instance is None:
-        _scheduler_instance = ScanScheduler(universe)
-    elif universe:
-        _scheduler_instance.set_universe(universe)
+    with _scheduler_lock:
+        if _scheduler_instance is None:
+            _scheduler_instance = ScanScheduler(universe)
+        elif universe:
+            _scheduler_instance.set_universe(universe)
     return _scheduler_instance
 
 

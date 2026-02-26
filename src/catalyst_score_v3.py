@@ -17,6 +17,7 @@
 
 import math
 import sqlite3
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
@@ -476,7 +477,7 @@ class CatalystScorerV3:
 
     def _init_db(self):
         """Initialize SQLite database for history tracking"""
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
             cursor = conn.cursor()
 
             # Catalyst events table
@@ -612,15 +613,14 @@ class CatalystScorerV3:
         confluence_score = calculate_confluence_bonus(sorted_catalysts)
 
         # Combined raw score
+        # S5-3 FIX: confluence_score was counted twice (in weighted sum AND as additive).
+        # Removed the additive line — confluence already weighted at 15%.
         raw_score = (
             type_score * 0.40 +        # Type is most important
             recency_score * 0.25 +     # Freshness matters
             quality_score * 0.20 +     # Source reliability
             confluence_score * 0.15    # Multiple catalysts bonus
         )
-
-        # Apply confluence as additive bonus
-        raw_score += confluence_score
 
         # Normalize to 0-1
         final_score = min(1.0, raw_score)
@@ -677,8 +677,11 @@ class CatalystScorerV3:
         """Determine alert level based on score and catalyst types"""
 
         # Check for high-impact catalyst types
+        # S5-3 FIX: Added PDUFA_DECISION and BREAKTHROUGH_DESIGNATION to high_impact_types
         high_impact_types = {
             CatalystType.FDA_APPROVAL,
+            CatalystType.PDUFA_DECISION,
+            CatalystType.BREAKTHROUGH_DESIGNATION,
             CatalystType.BUYOUT_CONFIRMED,
             CatalystType.MAJOR_PARTNERSHIP,
             CatalystType.FDA_TRIAL_POSITIVE,
@@ -703,7 +706,7 @@ class CatalystScorerV3:
     def record_catalyst(self, catalyst: Catalyst, final_score: float):
         """Record a catalyst event to history"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
                     INSERT INTO catalyst_events
@@ -743,7 +746,7 @@ class CatalystScorerV3:
             if price_after_1w:
                 return_1w = (price_after_1w - price_before) / price_before
 
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
                     INSERT INTO catalyst_performance
@@ -783,7 +786,7 @@ class CatalystScorerV3:
         cutoff = (datetime.now() - timedelta(days=lookback_days)).date()
 
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
                     SELECT
@@ -827,7 +830,7 @@ class CatalystScorerV3:
         cutoff = datetime.now() - timedelta(hours=hours)
 
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
                     SELECT catalyst_type, headline, source, timestamp,
@@ -947,6 +950,24 @@ def enhance_event_with_catalyst_score(
     event["catalyst_boost"] = score.boost_multiplier
 
     return event
+
+
+# ============================
+# SINGLETON (S5-3 FIX)
+# ============================
+
+_catalyst_scorer_lock = threading.Lock()
+_catalyst_scorer_instance: Optional[CatalystScorerV3] = None
+
+
+def get_catalyst_scorer() -> CatalystScorerV3:
+    """Thread-safe singleton for CatalystScorerV3."""
+    global _catalyst_scorer_instance
+    if _catalyst_scorer_instance is None:
+        with _catalyst_scorer_lock:
+            if _catalyst_scorer_instance is None:
+                _catalyst_scorer_instance = CatalystScorerV3()
+    return _catalyst_scorer_instance
 
 
 # ============================

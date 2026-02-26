@@ -34,6 +34,7 @@ Rôle:
 
 import asyncio
 import aiohttp
+import threading
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Set
 from dataclasses import dataclass
@@ -260,7 +261,7 @@ class SqueezeBoostEngine:
                 short_interest=short_interest,
                 avg_volume=avg_volume,
                 days_to_cover=dtc,
-                short_float_pct=latest.get("shortPercentFloat", 0) * 100
+                short_float_pct=latest.get("shortPercentFloat", 0)  # Already in % (e.g., 15.3 = 15.3%)
             )
 
         except Exception as e:
@@ -378,13 +379,15 @@ class SqueezeBoostEngine:
 # ============================
 
 _engine_instance = None
+_engine_lock = threading.Lock()  # S4-1 FIX: thread-safe singleton
 
 
 def get_squeeze_engine() -> SqueezeBoostEngine:
     """Get singleton engine instance"""
     global _engine_instance
-    if _engine_instance is None:
-        _engine_instance = SqueezeBoostEngine()
+    with _engine_lock:
+        if _engine_instance is None:
+            _engine_instance = SqueezeBoostEngine()
     return _engine_instance
 
 

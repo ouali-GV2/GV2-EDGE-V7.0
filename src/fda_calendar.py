@@ -590,7 +590,31 @@ class FDACalendarEngine:
             import os
             self._finnhub_key = os.getenv("FINNHUB_API_KEY", "")
 
+        # S3-5 FIX: CIKMapper for company name → ticker resolution.
+        # OpenFDA and ClinicalTrials.gov return company/sponsor names, not tickers.
+        # Without this, all OpenFDA events have ticker="" and are invisible to the system.
+        self._cik_mapper = None
+        try:
+            from src.ingestors.sec_filings_ingestor import get_cik_mapper
+            self._cik_mapper = get_cik_mapper()
+            logger.info("FDACalendarEngine: CIKMapper loaded for company→ticker resolution")
+        except Exception as _e:
+            logger.warning(f"FDACalendarEngine: CIKMapper unavailable ({_e}) — company tickers unresolved")
+
         logger.info("FDACalendarEngine initialized (OpenFDA + ClinicalTrials.gov + Finnhub)")
+
+    def _resolve_ticker(self, company_name: str) -> str:
+        """
+        S3-5 FIX: Resolve company name to ticker via CIKMapper.
+        Returns empty string if not resolvable.
+        """
+        if not company_name or not self._cik_mapper:
+            return ""
+        try:
+            ticker = self._cik_mapper.get_ticker_by_company(company_name)
+            return ticker or ""
+        except Exception:
+            return ""
 
     # ============================
     # Data Fetching Methods
@@ -680,7 +704,7 @@ class FDACalendarEngine:
                         )
 
                         fda_event = FDAEvent(
-                            ticker="",  # OpenFDA does not provide tickers directly
+                            ticker=self._resolve_ticker(sponsor),  # S3-5: CIKMapper company→ticker
                             company=sponsor,
                             drug_name=drug_name,
                             event_type=event_type,
@@ -823,7 +847,7 @@ class FDACalendarEngine:
                     )
 
                     fda_event = FDAEvent(
-                        ticker="",  # ClinicalTrials.gov does not provide tickers
+                        ticker=self._resolve_ticker(sponsor_name),  # S3-5: CIKMapper
                         company=sponsor_name,
                         drug_name=drug_name if drug_name else title[:60],
                         event_type="PHASE3_DATA" if "3" in phase_str else "PHASE2_TOPLINE",

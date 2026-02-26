@@ -149,7 +149,7 @@ class CIKMapper:
     def _init_db(self):
         """Initialize SQLite cache"""
         os.makedirs("data", exist_ok=True)
-        self.conn = sqlite3.connect(CIK_CACHE_DB)
+        self.conn = sqlite3.connect(CIK_CACHE_DB, check_same_thread=False)
         self.conn.execute("""
             CREATE TABLE IF NOT EXISTS cik_mapping (
                 cik TEXT PRIMARY KEY,
@@ -198,6 +198,58 @@ class CIKMapper:
         cursor.execute("SELECT cik FROM cik_mapping WHERE ticker = ?", (ticker.upper(),))
         row = cursor.fetchone()
         return row[0] if row else None
+
+    def get_ticker_by_company(self, company_name: str) -> Optional[str]:
+        """
+        Fuzzy lookup: find ticker by company name.
+
+        S3-5 FIX: OpenFDA and ClinicalTrials.gov return company/sponsor names,
+        not tickers. This method resolves names → tickers via the SEC EDGAR
+        CIK mapping (loaded from https://www.sec.gov/files/company_tickers.json).
+
+        Strategy:
+          1. Exact match (case-insensitive)
+          2. Starts-with match (handles "Pfizer Inc" → "Pfizer")
+          3. Contains match (partial, last resort)
+
+        Returns:
+            Ticker string or None if not found
+        """
+        if not company_name:
+            return None
+        name_upper = company_name.upper().strip()
+        cursor = self.conn.cursor()
+
+        # Exact match
+        cursor.execute(
+            "SELECT ticker FROM cik_mapping WHERE UPPER(company_name) = ? LIMIT 1",
+            (name_upper,)
+        )
+        row = cursor.fetchone()
+        if row:
+            return row[0]
+
+        # Starts-with (handles "Pfizer Inc." → "PFIZER")
+        cursor.execute(
+            "SELECT ticker FROM cik_mapping WHERE UPPER(company_name) LIKE ? LIMIT 1",
+            (name_upper + "%",)
+        )
+        row = cursor.fetchone()
+        if row:
+            return row[0]
+
+        # Contains (last resort — pick shortest match to avoid false positives)
+        cursor.execute(
+            "SELECT ticker, company_name FROM cik_mapping WHERE UPPER(company_name) LIKE ? LIMIT 5",
+            ("%" + name_upper + "%",)
+        )
+        rows = cursor.fetchall()
+        if rows:
+            # Prefer the shortest company_name (closest match)
+            rows.sort(key=lambda r: len(r[1]))
+            return rows[0][0]
+
+        return None
 
 
 # Global mapper instance

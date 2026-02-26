@@ -20,6 +20,7 @@ Architecture:
 import re
 import os
 import sqlite3
+import threading
 from typing import List, Set, Optional, Dict, Tuple
 from dataclasses import dataclass
 
@@ -364,14 +365,16 @@ class BatchTickerExtractor:
 # ============================
 
 _extractor_instance = None
+_extractor_lock = threading.Lock()  # S4-1 FIX: thread-safe singleton
 
 def get_ticker_extractor(universe: Set[str] = None) -> TickerExtractor:
     """Get singleton extractor instance"""
     global _extractor_instance
-    if _extractor_instance is None:
-        _extractor_instance = TickerExtractor(universe)
-    elif universe:
-        _extractor_instance.set_universe(universe)
+    with _extractor_lock:
+        if _extractor_instance is None:
+            _extractor_instance = TickerExtractor(universe)
+        elif universe:
+            _extractor_instance.set_universe(universe)
     return _extractor_instance
 
 

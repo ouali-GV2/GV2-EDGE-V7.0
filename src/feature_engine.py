@@ -306,11 +306,60 @@ def compute_many(tickers, limit=None):
 # Async versions (non-blocking)
 # ============================
 
+def _build_df_from_buffer(snapshots: list):
+    """
+    Build an approximate OHLCV DataFrame from TickerStateBuffer snapshots.
+
+    S1-12 FIX: For streamé tickers, TickerStateBuffer already holds up to 120
+    snapshots in RAM. Using them avoids a 2s IBKR get_bars() call per ticker.
+
+    Limitation: L1 streaming gives last/bid/ask/volume — not true OHLC bars.
+    Approximation: open=first_price, high=max, low=min, close=last, volume=last_volume.
+    Acceptable for momentum/vwap/volatility. Less precise for breakout_high.
+    """
+    if not snapshots or len(snapshots) < 5:
+        return None
+    try:
+        prices = [s.price for s in snapshots if s.price > 0]
+        if len(prices) < 5:
+            return None
+        df = pd.DataFrame([{
+            "open":   snapshots[0].price,
+            "high":   max(s.price for s in snapshots),
+            "low":    min(s.price for s in snapshots),
+            "close":  s.price,
+            "volume": s.volume,
+        } for s in snapshots])
+        if df["close"].isna().all() or (df["close"] == 0).all():
+            return None
+        return df
+    except Exception:
+        return None
+
+
 async def fetch_candles_async(ticker, resolution="1", lookback=120):
     """
-    Async wrapper — runs blocking fetch_candles() in thread pool.
-    ib.sleep(2) stays inside the worker thread, never blocks the event loop.
+    Priority:
+      1. TickerStateBuffer (0ms — streaming already in RAM for HOT tickers)
+      2. IBKR get_bars() via thread pool (~2s fallback)
+      3. Finnhub REST via thread pool (~500ms fallback)
+
+    S1-12 FIX: Was always calling get_bars() even for tickers already streamé.
     """
+    # --- Priority 1: TickerStateBuffer (streaming data, 0ms) ---
+    try:
+        from src.engines.ticker_state_buffer import get_ticker_state_buffer
+        buf = get_ticker_state_buffer()
+        snapshots = buf.get_snapshots(ticker, last_n=lookback)
+        if len(snapshots) >= 5:
+            df = _build_df_from_buffer(snapshots)
+            if df is not None:
+                logger.debug(f"Buffer hit: features for {ticker} ({len(snapshots)} snapshots)")
+                return df
+    except Exception as e:
+        logger.debug(f"Buffer unavailable for {ticker}: {e}")
+
+    # --- Priority 2 & 3: Network fallback (existing behaviour) ---
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(
         _executor,

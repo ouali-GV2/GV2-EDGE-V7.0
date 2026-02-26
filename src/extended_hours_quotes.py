@@ -114,74 +114,58 @@ class ExtendedHoursScanner:
             if cached:
                 return cached
         
-        if not self.ib:
-            return self._fallback_quote(ticker)
-        
-        try:
+        # S2-7 FIX: Route directly to ibkr_connector.get_quote() instead of
+        # reqMktData() + time.sleep(0.5) + ticker(). The connector already wraps
+        # the same L1 data with caching and is non-blocking (cache hit = 0ms).
+        # Fallback path (_fallback_quote) uses the same logic — unify to it.
+        quote = self._fallback_quote(ticker)
+        if quote:
+            extended_cache.set(cache_key, quote)
+        return quote
+
+        # --- legacy reqMktData path (kept for reference, no longer reachable) ---
+        try:  # noqa: unreachable
             from ib_insync import Stock
-            
-            # Create contract
+
             contract = Stock(ticker, 'SMART', 'USD')
             self.ib.qualifyContracts(contract)
-            
-            # Request market data with extended hours
-            self.ib.reqMktData(
-                contract, 
-                genericTickList='',
-                snapshot=False,
-                regulatorySnapshot=False
-            )
-            
-            # Wait for data
-            time.sleep(0.5)
-            
+            self.ib.reqMktData(contract, genericTickList='', snapshot=False, regulatorySnapshot=False)
+            time.sleep(0.5)  # blocking — replaced above
             ticker_data = self.ib.ticker(contract)
-            
+
             if not ticker_data:
                 self.ib.cancelMktData(contract)
                 return None
-            
-            # Get historical for reference prices
+
             bars = self.ib.reqHistoricalData(
-                contract,
-                endDateTime='',
-                durationStr='2 D',
-                barSizeSetting='1 day',
-                whatToShow='TRADES',
-                useRTH=True,
-                formatDate=1
+                contract, endDateTime='', durationStr='2 D',
+                barSizeSetting='1 day', whatToShow='TRADES', useRTH=True, formatDate=1
             )
-            
+
             prev_close = bars[-2].close if len(bars) >= 2 else 0
             rth_close = bars[-1].close if bars else 0
             rth_open = bars[-1].open if bars else 0
-            
-            # Current session
+
             session = get_market_session()
-            
-            # Get current prices
             last = ticker_data.last or ticker_data.close or 0
             bid = ticker_data.bid or 0
             ask = ticker_data.ask or 0
             volume = ticker_data.volume or 0
-            
-            # Calculate gaps and changes
+
             if prev_close > 0:
                 gap_pct = (last - prev_close) / prev_close
             else:
                 gap_pct = 0
-            
+
             if session == 'POST' and rth_close > 0:
                 change_pct = (last - rth_close) / rth_close
             elif session == 'PRE' and prev_close > 0:
                 change_pct = (last - prev_close) / prev_close
             else:
                 change_pct = gap_pct
-            
-            # Estimate extended hours volume
-            # (This is approximate - IBKR reports total volume)
-            extended_volume = volume  # During extended hours, this IS the extended volume
-            
+
+            extended_volume = volume
+
             quote = ExtendedQuote(
                 ticker=ticker,
                 session=session,
@@ -281,8 +265,6 @@ class ExtendedHoursScanner:
                         f"📈 {ticker}: gap={quote.gap_pct*100:+.1f}%, "
                         f"vol={quote.volume:,}"
                     )
-                
-                time.sleep(0.1)  # Rate limit
                 
             except Exception as e:
                 logger.debug(f"Scan error {ticker}: {e}")

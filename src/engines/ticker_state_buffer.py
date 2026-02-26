@@ -22,7 +22,7 @@ Memory: ~50 bytes/snapshot × 120 × 200 tickers = ~1.2MB (negligible)
 
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 import math
 import logging
@@ -138,7 +138,7 @@ class TickerStateBuffer:
         timestamp: Optional[datetime] = None
     ) -> None:
         """Convenience method to push raw values."""
-        ts = timestamp or datetime.utcnow()
+        ts = timestamp or datetime.now(timezone.utc)
         mid = (bid + ask) / 2 if bid > 0 and ask > 0 else price
         spread_pct = (ask - bid) / mid if mid > 0 and bid > 0 else 0.0
 
@@ -174,7 +174,7 @@ class TickerStateBuffer:
             volume_std=max(volume_std, 1.0),
             spread_mean=max(avg_spread, 0.001),
             spread_std=max(spread_std, 0.001),
-            last_updated=datetime.utcnow()
+            last_updated=datetime.now(timezone.utc)
         )
 
     def get_derivative_state(self, ticker: str) -> DerivativeState:
@@ -198,9 +198,13 @@ class TickerStateBuffer:
         w = min(self._derivative_window, n)
         baseline = self._baselines.get(ticker, BaselineStats())
 
+        # S5-5 FIX: Extract timestamps for time-normalized velocity ($/min)
+        recent_snaps = snapshots[-w:]
+        recent_ts = [s.timestamp for s in recent_snaps]
+
         # === Price derivatives ===
-        recent_prices = [s.price for s in snapshots[-w:]]
-        price_velocities = self._compute_velocities(recent_prices)
+        recent_prices = [s.price for s in recent_snaps]
+        price_velocities = self._compute_velocities(recent_prices, recent_ts)
         price_vel = price_velocities[-1] if price_velocities else 0.0
         price_acc = self._compute_acceleration(price_velocities)
 
@@ -208,8 +212,8 @@ class TickerStateBuffer:
         price_vel_pct = price_vel / base_price
 
         # === Volume derivatives ===
-        recent_volumes = [s.volume for s in snapshots[-w:]]
-        vol_velocities = self._compute_velocities(recent_volumes)
+        recent_volumes = [s.volume for s in recent_snaps]
+        vol_velocities = self._compute_velocities(recent_volumes, recent_ts)
         vol_vel = vol_velocities[-1] if vol_velocities else 0.0
         vol_acc = self._compute_acceleration(vol_velocities)
 
@@ -217,8 +221,8 @@ class TickerStateBuffer:
         vol_ratio = current_vol / baseline.volume_mean if baseline.volume_mean > 0 else 1.0
 
         # === Spread derivatives ===
-        recent_spreads = [s.spread_pct for s in snapshots[-w:]]
-        spread_velocities = self._compute_velocities(recent_spreads)
+        recent_spreads = [s.spread_pct for s in recent_snaps]
+        spread_velocities = self._compute_velocities(recent_spreads, recent_ts)
         spread_vel = spread_velocities[-1] if spread_velocities else 0.0
         spread_tightening = spread_vel < 0  # Negative = tightening (bullish)
 
@@ -317,11 +321,27 @@ class TickerStateBuffer:
     # ========================================================================
 
     @staticmethod
-    def _compute_velocities(values: List[float]) -> List[float]:
-        """Compute 1st derivative (velocity) from a list of values."""
+    def _compute_velocities(
+        values: List[float],
+        timestamps: Optional[List[datetime]] = None
+    ) -> List[float]:
+        """
+        S5-5 FIX: Compute 1st derivative normalized by real time delta (units/min).
+        If timestamps not provided, assumes 1-minute intervals (legacy behavior).
+        """
         if len(values) < 2:
             return []
-        return [values[i] - values[i - 1] for i in range(1, len(values))]
+        velocities = []
+        for i in range(1, len(values)):
+            delta = values[i] - values[i - 1]
+            if timestamps is not None and len(timestamps) > i:
+                # Normalize by actual elapsed time in minutes
+                dt_secs = (timestamps[i] - timestamps[i - 1]).total_seconds()
+                if dt_secs > 0:
+                    delta = delta / (dt_secs / 60.0)  # units per minute
+                # else: snapshots at same timestamp → keep raw delta
+            velocities.append(delta)
+        return velocities
 
     @staticmethod
     def _compute_acceleration(velocities: List[float]) -> float:

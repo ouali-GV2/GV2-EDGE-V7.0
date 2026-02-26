@@ -457,9 +457,13 @@ def compute_pattern_score(ticker, df, pm_data=None):
     # Add PM pattern if data available
     if pm_data:
         pm_score = pm_rth_continuation_pattern(df, pm_data)
-        # Replace volume_squeeze weight partially
-        patterns["volume_squeeze"] = volume_squeeze_score(df) * 0.15  # Reduced
-        patterns["pm_rth_continuation"] = pm_score * 0.35  # MAJOR weight
+        # S4-3 FIX: previous code reduced volume_squeeze by 0.15 but added pm at 0.35
+        # → net +0.20, sum = 1.20 instead of 1.00.
+        # Fix: zero out volume_squeeze, trim tight_consolidation 0.20→0.15 → sum = 1.00:
+        #   0.20 + 0.15 + 0.15 + 0.15 + 0.00 + 0.35 = 1.00 ✓
+        patterns["tight_consolidation"] = tight_consolidation(df) * 0.15  # was 0.20
+        patterns["volume_squeeze"] = 0.0                                    # was 0.30
+        patterns["pm_rth_continuation"] = pm_score * 0.35                  # MAJOR weight
     
     # Score total
     total_score = sum(patterns.values())

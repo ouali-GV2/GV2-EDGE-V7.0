@@ -32,7 +32,8 @@ Sources de signaux:
 """
 
 import asyncio
-from datetime import datetime
+import threading
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Set, Callable, Any
 from dataclasses import dataclass
 import uuid
@@ -225,17 +226,20 @@ class SignalProducer:
             adjusted_score=adjusted_score,
             confidence=confidence,
             reasons=reasons,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(timezone.utc)
         )
 
         # Step 5: Build unified signal
         signal = self._build_unified_signal(input_data, result)
 
-        # Step 6: Update stats
+        # Step 6: Check cooldown BEFORE updating stats (stats track every detection)
+        should_alert = self._should_signal(ticker)
+
+        # Step 7: Update stats (always — for monitoring and deduplication timestamp)
         self._update_stats(signal)
 
-        # Step 7: Notify callbacks (if actionable)
-        if signal.is_actionable():
+        # Step 8: Notify callbacks (if actionable AND not in cooldown)
+        if signal.is_actionable() and should_alert:
             await self._notify_callbacks(signal)
 
         return signal
@@ -438,7 +442,7 @@ class SignalProducer:
     ) -> UnifiedSignal:
         """Build unified signal from detection result"""
 
-        signal_id = f"sig_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{input_data.ticker}"
+        signal_id = f"sig_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{input_data.ticker}"
 
         # Build badges
         badges = []
@@ -512,7 +516,7 @@ class SignalProducer:
             return True
 
         last_signal = self._recent_signals[ticker]
-        elapsed = (datetime.utcnow() - last_signal).total_seconds()
+        elapsed = (datetime.now(timezone.utc) - last_signal).total_seconds()
 
         return elapsed >= self._signal_cooldown_seconds
 
@@ -535,13 +539,15 @@ class SignalProducer:
 # ============================================================================
 
 _producer_instance = None
+_producer_lock = threading.Lock()  # S4-1 FIX: thread-safe singleton
 
 
 def get_signal_producer() -> SignalProducer:
     """Get singleton producer instance"""
     global _producer_instance
-    if _producer_instance is None:
-        _producer_instance = SignalProducer()
+    with _producer_lock:
+        if _producer_instance is None:
+            _producer_instance = SignalProducer()
     return _producer_instance
 
 

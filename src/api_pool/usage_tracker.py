@@ -409,13 +409,15 @@ class UsageTracker:
 # ============================================================================
 
 _tracker_instance = None
+_tracker_lock = Lock()  # S4-1 FIX: thread-safe singleton
 
 
 def get_tracker() -> UsageTracker:
     """Get singleton tracker instance"""
     global _tracker_instance
-    if _tracker_instance is None:
-        _tracker_instance = UsageTracker()
+    with _tracker_lock:
+        if _tracker_instance is None:
+            _tracker_instance = UsageTracker()
     return _tracker_instance
 
 

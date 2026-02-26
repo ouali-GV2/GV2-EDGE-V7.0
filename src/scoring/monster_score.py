@@ -28,6 +28,7 @@ The score determines signal strength: BUY (0.65+), BUY_STRONG (0.80+)
 
 import json
 import os
+from typing import Optional
 
 from utils.logger import get_logger
 from utils.cache import Cache
@@ -35,6 +36,16 @@ from utils.cache import Cache
 from src.event_engine.event_hub import get_events_by_ticker
 from src.feature_engine import compute_features
 from src.pm_scanner import compute_pm_metrics
+
+# S5-3: CatalystScorerV3 singleton for enhanced event scoring
+CATALYST_V3_AVAILABLE = False
+try:
+    from src.catalyst_score_v3 import (
+        get_catalyst_scorer, create_catalyst_from_event, CatalystType
+    )
+    CATALYST_V3_AVAILABLE = True
+except ImportError:
+    pass
 
 # Import intelligence modules with graceful fallback
 from src.historical_beat_rate import get_earnings_probability
@@ -86,31 +97,51 @@ cache = Cache(ttl=30)
 
 WEIGHT_FILE = "data/monster_score_weights.json"
 
+# S2-4 FIX: Cache weights at module level — avoid file I/O on every tick.
+# compute_monster_score() is called once per ticker per cycle (100s of tickers).
+# Before: open+read+json.load() per call. After: read once, cached in _weights.
+# reload_weights() lets score_optimizer refresh without restarting the process.
+_weights: Optional[dict] = None
+
 
 # ============================
 # Load weights (auto-tuning ready)
 # ============================
 
-def load_weights():
+def load_weights() -> dict:
     """
-    Load weights from file or use ADVANCED_MONSTER_WEIGHTS as default
-    
+    Load weights from file or use ADVANCED_MONSTER_WEIGHTS as default.
+    Cached after first call; use reload_weights() to force refresh.
+
     Priority:
     1. Custom weights from weekly_audit auto-tuning (if exists)
     2. ADVANCED_MONSTER_WEIGHTS from config (optimized)
     """
+    global _weights
+    if _weights is not None:
+        return _weights
+
     if os.path.exists(WEIGHT_FILE):
         try:
             with open(WEIGHT_FILE) as f:
                 custom_weights = json.load(f)
                 logger.info("Using custom auto-tuned weights")
-                return custom_weights
-        except:
+                _weights = custom_weights
+                return _weights
+        except Exception:
             pass
-    
+
     # Use optimized weights from config
     logger.info("Using ADVANCED_MONSTER_WEIGHTS from config")
-    return ADVANCED_MONSTER_WEIGHTS.copy()
+    _weights = ADVANCED_MONSTER_WEIGHTS.copy()
+    return _weights
+
+
+def reload_weights() -> dict:
+    """Force reload weights from file (called by score_optimizer after auto-tune)."""
+    global _weights
+    _weights = None
+    return load_weights()
 
 
 def save_weights(w):
@@ -139,12 +170,44 @@ def normalize(x, scale=1):
 # ============================
 
 def compute_event_score(ticker):
+    """
+    S5-3 FIX: Use CatalystScorerV3 when available for richer event scoring.
+    Falls back to event_hub raw boosted_impact if V3 unavailable.
+    """
     events = get_events_by_ticker(ticker)
 
     if not events:
         return 0
 
-    return max(e["boosted_impact"] for e in events)
+    # Base score: best boosted_impact from event_hub (guarded against KeyError)
+    base_score = 0.0
+    for e in events:
+        val = e.get("boosted_impact")
+        if val is not None:
+            base_score = max(base_score, val)
+
+    if not CATALYST_V3_AVAILABLE:
+        return base_score
+
+    # Enhanced score via CatalystScorerV3 singleton
+    try:
+        scorer = get_catalyst_scorer()
+        catalysts = [
+            create_catalyst_from_event(
+                ticker=ticker,
+                event_type=e.get("event_type", "unknown"),
+                headline=e.get("headline", ""),
+                source=e.get("source", "financial"),
+                impact_score=e.get("boosted_impact", 0.5)
+            )
+            for e in events
+        ]
+        v3_score = scorer.score_catalysts(ticker, catalysts)
+        # Additive: take max of base and V3 final_score
+        return max(base_score, v3_score.final_score)
+    except Exception as exc:
+        logger.debug(f"CatalystV3 score error for {ticker}: {exc}")
+        return base_score
 
 
 def compute_monster_score(ticker, use_advanced=True):

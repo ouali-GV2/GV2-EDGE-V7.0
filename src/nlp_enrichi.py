@@ -385,7 +385,7 @@ def _call_grok(prompt: str, text: str, temperature: float = 0.1) -> Optional[Dic
 
     try:
         payload = {
-            "model": "grok-4-1-fast-reasoning",
+            "model": "grok-3-fast",
             "messages": [
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": text}
@@ -399,6 +399,9 @@ def _call_grok(prompt: str, text: str, temperature: float = 0.1) -> Optional[Dic
         }
 
         response = safe_post(GROK_ENDPOINT, json=payload, headers=headers)
+        if response.status_code != 200:
+            logger.warning(f"Grok API HTTP {response.status_code}: {response.text[:200]}")
+            return None
         result = response.json()
 
         content = result["choices"][0]["message"]["content"]
@@ -419,6 +422,81 @@ def _call_grok(prompt: str, text: str, temperature: float = 0.1) -> Optional[Dic
         return None
     except Exception as e:
         logger.error(f"Grok API error: {e}")
+        return None
+
+
+# S5-1 FIX: Unified Grok prompt — replaces 3 separate calls with 1
+UNIFIED_NLP_PROMPT = """
+You are a financial NLP engine for small-cap US stocks. Analyze the headline and body text.
+
+Return a single JSON object with THREE sections (sentiment, entities, classification):
+
+{
+  "sentiment": {
+    "direction": "very_bullish|bullish|slightly_bullish|neutral|slightly_bearish|bearish|very_bearish",
+    "confidence": 0.0,
+    "intensity": "weak|moderate|strong",
+    "headline_sentiment": 0.0,
+    "body_sentiment": 0.0,
+    "bullish_factors": [],
+    "bearish_factors": []
+  },
+  "entities": {
+    "tickers": ["ABC"],
+    "people": [{"name": "...", "role": "...", "company": "..."}],
+    "products": ["Product Name"],
+    "numbers": [{"type": "revenue|price_target|contract|etc", "value": "...", "context": "..."}]
+  },
+  "classification": {
+    "category": "fda_regulatory|earnings|merger_acquisition|analyst_rating|contract_deal|product_launch|management|legal|guidance|insider_activity|sector_news|macro|other",
+    "urgency": "breaking|high|medium|low|stale",
+    "relevance_score": 0.0,
+    "reasoning": "brief explanation"
+  }
+}
+
+Context: Small-cap US stock news. Focus on market-moving events.
+Only output valid JSON. No text outside JSON.
+"""
+
+
+def _call_grok_unified(headline: str, body: str) -> Optional[Dict]:
+    """
+    S5-1 FIX: Single Grok call returning sentiment + entities + classification.
+    Reduces API calls from 3 to 1 per news item (-67% Grok usage).
+    """
+    if not GROK_API_KEY:
+        return None
+
+    text = f"Headline: {headline}\n\nBody: {body[:800]}"
+
+    try:
+        payload = {
+            "model": "grok-3-fast",
+            "messages": [
+                {"role": "system", "content": UNIFIED_NLP_PROMPT},
+                {"role": "user", "content": text}
+            ],
+            "temperature": 0.1
+        }
+        headers = {
+            "Authorization": f"Bearer {GROK_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        response = safe_post(GROK_ENDPOINT, json=payload, headers=headers)
+        if response.status_code != 200:
+            logger.warning(f"Unified Grok HTTP {response.status_code}")
+            return None
+        result = response.json()
+        content = result["choices"][0]["message"]["content"].strip()
+        # Strip markdown fences
+        if content.startswith("```"):
+            content = content.split("\n", 1)[-1]
+            if content.endswith("```"):
+                content = content[: content.rfind("```")]
+        return json.loads(content.strip())
+    except Exception as e:
+        logger.debug(f"Unified Grok call failed: {e}")
         return None
 
 
@@ -549,7 +627,7 @@ class NLPEnrichi:
 
     def _init_db(self):
         """Initialize SQLite database"""
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
             cursor = conn.cursor()
 
             # Sentiment history table
@@ -730,14 +808,49 @@ class NLPEnrichi:
         """
         Fully enrich a news item with sentiment, entities, and classification.
         """
-        # Extract entities
-        tickers, entities = self.extract_entities(headline + " " + body)
+        # S5-1 FIX: Try unified Grok call (1 API call vs 3) when Grok enabled
+        unified = None
+        if self.use_grok:
+            unified = _call_grok_unified(headline, body)
 
-        # Analyze sentiment
-        sentiment = self.analyze_sentiment(body, headline)
+        if unified:
+            # Parse all 3 sections from unified response
+            s = unified.get("sentiment", {})
+            e = unified.get("entities", {})
+            c = unified.get("classification", {})
 
-        # Classify news
-        category, urgency, relevance = self.classify_news(body, headline, published_at)
+            direction = self._parse_direction(s.get("direction", "neutral"))
+            sentiment = SentimentAnalysis(
+                direction=direction,
+                score=SENTIMENT_SCORES.get(direction, 0.0),
+                confidence=float(s.get("confidence", 0.7)),
+                intensity=s.get("intensity", "moderate"),
+                headline_sentiment=float(s.get("headline_sentiment", 0.0)),
+                body_sentiment=float(s.get("body_sentiment", 0.0)),
+                bullish_keywords=s.get("bullish_factors", []),
+                bearish_keywords=s.get("bearish_factors", []),
+            )
+
+            grok_tickers = e.get("tickers", [])
+            regex_tickers = extract_tickers_regex(headline + " " + body)
+            tickers = list(set(grok_tickers + regex_tickers))
+            entities = []
+            for person in e.get("people", []):
+                entities.append(ExtractedEntity(
+                    entity_type="person",
+                    value=person.get("name", ""),
+                    context=f"{person.get('role', '')} at {person.get('company', '')}",
+                    confidence=0.8
+                ))
+
+            category = self._parse_category(c.get("category", "other"))
+            urgency = self._parse_urgency(c.get("urgency", "medium"))
+            relevance = float(c.get("relevance_score", 0.5))
+        else:
+            # Fallback: separate calls (or keyword-only if Grok not enabled)
+            tickers, entities = self.extract_entities(headline + " " + body)
+            sentiment = self.analyze_sentiment(body, headline)
+            category, urgency, relevance = self.classify_news(body, headline, published_at)
 
         # Calculate impact score
         category_impact = CATEGORY_IMPACT.get(category, 0.2)
@@ -797,7 +910,7 @@ class NLPEnrichi:
         cutoff = datetime.now() - timedelta(hours=hours)
 
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
                 cursor = conn.cursor()
 
                 # Get recent sentiment records
@@ -936,7 +1049,7 @@ class NLPEnrichi:
     def _record_sentiment(self, ticker: str, enriched: EnrichedNews):
         """Record sentiment to database"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
                     INSERT INTO sentiment_history
@@ -1041,12 +1154,35 @@ class NLPEnrichi:
 # CONVENIENCE FUNCTIONS
 # ============================
 
+_nlp_singleton: Optional["NLPEnrichi"] = None
+_nlp_singleton_lock = None  # Lazy import threading
+
+
+def _get_nlp_lock():
+    import threading
+    global _nlp_singleton_lock
+    if _nlp_singleton_lock is None:
+        _nlp_singleton_lock = threading.Lock()
+    return _nlp_singleton_lock
+
+
+def get_nlp_enrichi() -> "NLPEnrichi":
+    """S5-1 FIX: Thread-safe singleton — avoids creating a new NLPEnrichi per call."""
+    global _nlp_singleton
+    if _nlp_singleton is None:
+        with _get_nlp_lock():
+            if _nlp_singleton is None:
+                _nlp_singleton = NLPEnrichi()
+    return _nlp_singleton
+
+
 def get_nlp_sentiment_boost(ticker: str, nlp: Optional[NLPEnrichi] = None) -> float:
     """
     Convenience function to get NLP sentiment boost for Monster Score.
+    S5-1 FIX: Uses singleton to avoid creating a new instance on every call.
     """
     if nlp is None:
-        nlp = NLPEnrichi()
+        nlp = get_nlp_enrichi()
     return nlp.get_sentiment_boost(ticker)
 
 

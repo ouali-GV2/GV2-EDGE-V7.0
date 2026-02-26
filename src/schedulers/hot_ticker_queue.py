@@ -26,10 +26,11 @@ Architecture:
 
 import heapq
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Set, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
+import json
 import sqlite3
 import os
 
@@ -108,7 +109,7 @@ class HotTicker:
 
     def is_expired(self) -> bool:
         """Check if ticker has expired"""
-        return datetime.utcnow() > self.expires_at
+        return datetime.now(timezone.utc) > self.expires_at
 
     def should_scan(self) -> bool:
         """Check if ticker should be scanned now"""
@@ -121,7 +122,7 @@ class HotTicker:
             TickerPriority.NORMAL: INTERVAL_NORMAL
         }
 
-        elapsed = (datetime.utcnow() - self.last_scan).total_seconds()
+        elapsed = (datetime.now(timezone.utc) - self.last_scan).total_seconds()
         return elapsed >= intervals[self.priority]
 
 
@@ -185,7 +186,7 @@ class HotTickerQueue:
                 added_at=datetime.fromisoformat(added_at),
                 last_scan=datetime.fromisoformat(last_scan) if last_scan else None,
                 expires_at=datetime.fromisoformat(expires_at) if expires_at else None,
-                metadata=eval(metadata) if metadata else {}
+                metadata=json.loads(metadata) if metadata else {}
             )
 
             # Only load if not expired
@@ -212,7 +213,7 @@ class HotTickerQueue:
             hot.added_at.isoformat(),
             hot.last_scan.isoformat() if hot.last_scan else None,
             hot.expires_at.isoformat() if hot.expires_at else None,
-            str(hot.metadata)
+            json.dumps(hot.metadata)
         ))
         self.conn.commit()
 
@@ -251,7 +252,7 @@ class HotTickerQueue:
             # If exists at higher priority, don't downgrade
             if existing and existing.priority.value <= priority.value:
                 # Refresh TTL
-                existing.expires_at = datetime.utcnow() + timedelta(
+                existing.expires_at = datetime.now(timezone.utc) + timedelta(
                     seconds={
                         TickerPriority.HOT: TTL_HOT,
                         TickerPriority.WARM: TTL_WARM,
@@ -288,9 +289,11 @@ class HotTickerQueue:
             # Clean expired entries
             self._cleanup_expired()
 
-            # Find first ticker that should be scanned
-            for _, _, hot in sorted(self._heap):
-                if hot.ticker in self._tickers and hot.should_scan():
+            # S4-6 FIX: sorted(self._heap) iterated a lazy-deletion heap that can contain
+            # stale entries (tickers removed from _tickers but still in heap).
+            # Iterate _tickers dict directly — always consistent, O(n log n) but no stale data.
+            for hot in sorted(self._tickers.values(), key=lambda h: h.priority.value):
+                if hot.should_scan():
                     return hot.ticker
 
             return None
@@ -305,9 +308,10 @@ class HotTickerQueue:
         with self._lock:
             self._cleanup_expired()
 
+            # S4-6 FIX: same as pop_next_for_scan — use _tickers dict, not stale heap
             result = []
-            for _, _, hot in sorted(self._heap):
-                if hot.ticker in self._tickers and hot.should_scan():
+            for hot in sorted(self._tickers.values(), key=lambda h: h.priority.value):
+                if hot.should_scan():
                     result.append(hot.ticker)
 
             return result
@@ -324,7 +328,7 @@ class HotTickerQueue:
         with self._lock:
             if ticker in self._tickers:
                 hot = self._tickers[ticker]
-                hot.last_scan = datetime.utcnow()
+                hot.last_scan = datetime.now(timezone.utc)
 
                 # C6: Auto-renewal — extend TTL if ticker still shows activity
                 if still_active:
@@ -333,7 +337,7 @@ class HotTickerQueue:
                         TickerPriority.WARM: TTL_WARM,
                         TickerPriority.NORMAL: TTL_NORMAL
                     }
-                    hot.expires_at = datetime.utcnow() + timedelta(seconds=ttl[hot.priority])
+                    hot.expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl[hot.priority])
                     logger.debug(f"Auto-renewed TTL for {ticker} ({hot.priority.name})")
 
                 self._save_to_db(hot)
@@ -348,7 +352,7 @@ class HotTickerQueue:
                 if new_priority.value < hot.priority.value:
                     hot.priority = new_priority
                     # Refresh TTL
-                    hot.expires_at = datetime.utcnow() + timedelta(
+                    hot.expires_at = datetime.now(timezone.utc) + timedelta(
                         seconds=TTL_HOT if new_priority == TickerPriority.HOT else TTL_WARM
                     )
                     self._save_to_db(hot)
@@ -443,13 +447,15 @@ class HotTickerQueue:
 # ============================
 
 _queue_instance = None
+_queue_lock = threading.Lock()  # S4-1 FIX: thread-safe singleton
 
 
 def get_hot_queue() -> HotTickerQueue:
     """Get singleton queue instance"""
     global _queue_instance
-    if _queue_instance is None:
-        _queue_instance = HotTickerQueue()
+    with _queue_lock:
+        if _queue_instance is None:
+            _queue_instance = HotTickerQueue()
     return _queue_instance
 
 

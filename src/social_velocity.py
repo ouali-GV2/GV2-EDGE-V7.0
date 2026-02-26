@@ -367,3 +367,136 @@ def get_social_velocity_engine() -> SocialVelocityEngine:
         if _engine is None:
             _engine = SocialVelocityEngine()
     return _engine
+
+
+# ============================================================================
+# S5-2 FIX: Background collection loop
+# ============================================================================
+
+_collection_thread: Optional[threading.Thread] = None
+_collection_stop = threading.Event()
+_watched_tickers: List[str] = []
+_watched_lock = threading.Lock()
+
+
+def start_background_collection(
+    universe_tickers: Optional[List[str]] = None,
+    interval_min: int = SNAPSHOT_INTERVAL_MIN
+) -> None:
+    """
+    S5-2 FIX: Start a daemon thread that collects Reddit/StockTwits data
+    every `interval_min` minutes and feeds SocialVelocityEngine.
+
+    Also promotes trending tickers to HotTickerQueue.
+
+    Args:
+        universe_tickers: Initial list of tickers to monitor.
+        interval_min: Collection interval in minutes (default 15).
+    """
+    global _collection_thread, _watched_tickers
+
+    if _collection_thread is not None and _collection_thread.is_alive():
+        logger.debug("Background collection already running")
+        return
+
+    with _watched_lock:
+        _watched_tickers = list(universe_tickers or [])
+
+    _collection_stop.clear()
+
+    def _run():
+        import asyncio
+        engine = get_social_velocity_engine()
+
+        # Import lazily to avoid circular imports
+        try:
+            from src.ingestors.social_buzz_engine import SocialBuzzEngine
+            buzz_engine = SocialBuzzEngine()
+        except Exception as exc:
+            logger.error(f"Could not import SocialBuzzEngine: {exc}")
+            return
+
+        try:
+            from src.schedulers.hot_ticker_queue import get_hot_queue
+            from src.schedulers.hot_ticker_queue import TickerPriority
+            hot_queue_available = True
+        except Exception:
+            hot_queue_available = False
+
+        logger.info(f"Social velocity background collection started (interval={interval_min}min)")
+
+        while not _collection_stop.is_set():
+            try:
+                with _watched_lock:
+                    tickers = list(_watched_tickers)
+
+                if not tickers:
+                    _collection_stop.wait(interval_min * 60)
+                    continue
+
+                # Fetch buzz in batches of 20 to respect rate limits
+                batch_size = 20
+                for i in range(0, len(tickers), batch_size):
+                    batch = tickers[i: i + batch_size]
+                    try:
+                        buzz_map = asyncio.run(buzz_engine.get_buzz_batch(batch))
+                    except Exception as exc:
+                        logger.debug(f"Buzz batch error: {exc}")
+                        buzz_map = {}
+
+                    for ticker, bm in buzz_map.items():
+                        engine.record_mentions(
+                            ticker=ticker,
+                            reddit=bm.reddit_mentions,
+                            stocktwits=bm.stocktwits_mentions,
+                            bullish=getattr(bm, "bullish_count", 0),
+                            bearish=getattr(bm, "bearish_count", 0),
+                        )
+
+                    if _collection_stop.is_set():
+                        break
+
+                # Promote trending tickers to HotTickerQueue
+                if hot_queue_available:
+                    try:
+                        trending = engine.get_top_trending(min_score=0.5, limit=10)
+                        hq = get_hot_queue()
+                        for vel in trending:
+                            hq.add_ticker(
+                                vel.ticker,
+                                priority=TickerPriority.HOT,
+                                reason=f"social_velocity={vel.social_score:.2f} "
+                                       f"z={vel.velocity_zscore:.1f}",
+                            )
+                            logger.info(
+                                f"[SOCIAL_VEL] Promoted {vel.ticker} to HOT "
+                                f"(score={vel.social_score:.2f})"
+                            )
+                    except Exception as exc:
+                        logger.debug(f"HotQueue promote error: {exc}")
+
+            except Exception as exc:
+                logger.error(f"Social velocity collection cycle error: {exc}")
+
+            # Wait for next cycle (interruptible)
+            _collection_stop.wait(interval_min * 60)
+
+        logger.info("Social velocity background collection stopped")
+
+    _collection_thread = threading.Thread(
+        target=_run,
+        name="social-velocity-collector",
+        daemon=True
+    )
+    _collection_thread.start()
+
+
+def stop_background_collection() -> None:
+    """Stop the background collection thread."""
+    _collection_stop.set()
+
+
+def update_watched_tickers(tickers: List[str]) -> None:
+    """Update the list of tickers to monitor (thread-safe)."""
+    with _watched_lock:
+        _watched_tickers[:] = tickers

@@ -24,6 +24,7 @@ Architecture:
 
 import os
 import sqlite3
+import threading
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Set
 from dataclasses import dataclass, field, asdict
@@ -404,13 +405,15 @@ class KeyRegistry:
 # ============================================================================
 
 _registry_instance = None
+_registry_lock = threading.Lock()  # S4-1 FIX: thread-safe singleton
 
 
 def get_registry() -> KeyRegistry:
     """Get singleton registry instance"""
     global _registry_instance
-    if _registry_instance is None:
-        _registry_instance = KeyRegistry()
+    with _registry_lock:
+        if _registry_instance is None:
+            _registry_instance = KeyRegistry()
     return _registry_instance
 
 

@@ -36,6 +36,8 @@ from config import (
     ENABLE_RISK_GUARD,
     ENABLE_MARKET_MEMORY,
     ENABLE_MULTI_RADAR,
+    ENABLE_ACCELERATION_ENGINE,
+    ENABLE_PRE_SPIKE_RADAR,
 )
 
 logger = get_logger("MAIN")
@@ -97,6 +99,12 @@ from src.pre_halt_engine import (
     PreHaltEngine,
     get_pre_halt_engine,
 )
+
+# V8 Acceleration Engine (derivative-based anticipation)
+from src.engines.acceleration_engine import get_acceleration_engine
+
+# Pre-Spike Radar (precursor signals detection)
+from src.pre_spike_radar import scan_pre_spike
 
 # IBKR News Trigger
 from src.ibkr_news_trigger import (
@@ -314,18 +322,60 @@ async def process_ticker_v7(ticker: str, state: V7State) -> Optional[UnifiedSign
         if not current_price or current_price <= 0:
             return None
 
+        # === STEP 1.5: ACCELERATION ENGINE V8 (reads from TickerStateBuffer) ===
+        # S1-1 FIX: AccelerationEngine was imported but never called in this pipeline.
+        # It was only invoked inside MultiRadarEngine.FlowRadar. Now wired here so
+        # acceleration_state / volume_zscore / accumulation_score are always set.
+        accel_score = None
+        if ENABLE_ACCELERATION_ENGINE:
+            try:
+                accel_engine = get_acceleration_engine()
+                accel_score = accel_engine.score(ticker)
+            except Exception as e:
+                logger.debug(f"AccelerationEngine error {ticker}: {e}")
+
+        # === STEP 1.6: PRE-SPIKE RADAR ===
+        # S1-8 FIX: Pre-Spike Radar was never invoked — pre_spike_state was always DORMANT.
+        pre_spike_state = PreSpikeState.DORMANT
+        pre_spike_score = 0.0
+        if ENABLE_PRE_SPIKE_RADAR:
+            try:
+                volume_data = {
+                    "current_volume": int(quote.get("volume", 0)) if quote else 0,
+                    "historical_volumes": [features.get("avg_volume", features.get("volume", 1))] * 5 if features else [],
+                    "avg_daily_volume": features.get("avg_volume", features.get("volume", 1)) if features else 1,
+                }
+                psr = scan_pre_spike(ticker, volume_data=volume_data)
+                _alert_to_state = {
+                    "HIGH": PreSpikeState.LAUNCHING,
+                    "ELEVATED": PreSpikeState.READY,
+                    "WATCH": PreSpikeState.CHARGING,
+                    "NONE": PreSpikeState.DORMANT,
+                }
+                pre_spike_state = _alert_to_state.get(psr.alert_level, PreSpikeState.DORMANT)
+                pre_spike_score = psr.pre_spike_probability
+            except Exception as e:
+                logger.debug(f"Pre-Spike Radar error {ticker}: {e}")
+
         # === STEP 2: Build detection input ===
         detection_input = DetectionInput(
             ticker=ticker,
             current_price=current_price,
             monster_score=monster_score,
             catalyst_score=score_data.get("components", {}).get("event", 0),
-            pre_spike_state=PreSpikeState.DORMANT,
+            pre_spike_state=pre_spike_state,
+            pre_spike_score=pre_spike_score,
             catalyst_type=score_data.get("catalyst_type"),
             catalyst_confidence=score_data.get("catalyst_confidence", 0.5),
             volume_ratio=features.get("volume_ratio", 1.0) if features else 1.0,
             price_change_pct=features.get("price_change", 0) if features else 0,
-            market_session="RTH" if is_market_open() else ("PRE" if is_premarket() else "POST")
+            market_session="RTH" if is_market_open() else ("PRE" if is_premarket() else "POST"),
+            # V8 AccelerationEngine fields (S1-1 FIX)
+            acceleration_state=accel_score.state if accel_score else "DORMANT",
+            acceleration_score=accel_score.acceleration_score if accel_score else 0.0,
+            volume_zscore=accel_score.volume_zscore if accel_score else 0.0,
+            accumulation_score=accel_score.accumulation_score if accel_score else 0.0,
+            breakout_readiness=accel_score.breakout_readiness if accel_score else 0.0,
         )
 
         # === STEP 3: SIGNAL PRODUCER (Layer 1 - Detection) ===
@@ -487,9 +537,12 @@ def handle_signal_result(signal: UnifiedSignal, state: V7State):
             log_signal(trade_plan)
             send_signal_alert(trade_plan)
 
+            # S1-2 FIX: trades_today was never incremented — DAILY_TRADE_LIMIT never triggered.
+            state.record_trade()
+
             logger.info(
                 f"  TRADE PLAN: {order.size_shares} shares @ ${order.price_target:.2f} "
-                f"(stop: ${order.stop_loss:.2f})"
+                f"(stop: ${order.stop_loss:.2f}) [trades today: {state.trades_today}/{DAILY_TRADE_LIMIT}]"
             )
     else:
         # Signal blocked - track the miss if enabled
@@ -833,6 +886,34 @@ def run_edge():
                     logger.warning("  IBKR Streaming: FAILED (falling back to poll mode)")
             except Exception as e:
                 logger.warning(f"  IBKR Streaming: ERROR ({e}) — using poll mode")
+
+        # S3-3 FIX: Initialize TickerStateBuffer baselines from universe data.
+        # Without baselines, z-scores default to volume_mean=1 → all tickers show
+        # extreme z-scores on first real tick (e.g. 50000x vs baseline of 1).
+        # Set per-ticker avg_volume from universe so AccelerationEngine gets
+        # meaningful volume anomaly scores from tick 1.
+        try:
+            from src.engines.ticker_state_buffer import get_ticker_state_buffer
+            buf = get_ticker_state_buffer()
+            if universe is not None and not universe.empty:
+                initialized = 0
+                for _, row in universe.head(300).iterrows():
+                    ticker = str(row.get("ticker") or row.get("symbol") or "").strip()
+                    if not ticker:
+                        continue
+                    avg_vol = float(row.get("avg_volume") or row.get("avgVolume") or 500_000)
+                    price = float(row.get("price") or row.get("last") or 5.0)
+                    buf.set_baseline_raw(
+                        ticker=ticker,
+                        avg_price=max(price, 0.01),
+                        price_std=max(price * 0.02, 0.01),    # 2% typical daily std
+                        avg_volume=max(avg_vol, 1.0),
+                        volume_std=max(avg_vol * 0.5, 1.0),  # 50% vol std is typical
+                    )
+                    initialized += 1
+                logger.info(f"  TickerStateBuffer: {initialized} baselines initialized from universe")
+        except Exception as e:
+            logger.warning(f"  TickerStateBuffer baseline init failed: {e}")
 
     while True:
         try:

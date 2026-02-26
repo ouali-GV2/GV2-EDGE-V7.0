@@ -29,6 +29,7 @@ import math
 import asyncio
 import aiohttp
 import sqlite3
+import threading
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Set
 from dataclasses import dataclass
@@ -524,13 +525,15 @@ class SocialBuzzEngine:
 # ============================
 
 _engine_instance = None
+_engine_lock = threading.Lock()  # S4-1 FIX: thread-safe singleton
 
 
 def get_buzz_engine() -> SocialBuzzEngine:
     """Get singleton engine instance"""
     global _engine_instance
-    if _engine_instance is None:
-        _engine_instance = SocialBuzzEngine()
+    with _engine_lock:
+        if _engine_instance is None:
+            _engine_instance = SocialBuzzEngine()
     return _engine_instance
 
 

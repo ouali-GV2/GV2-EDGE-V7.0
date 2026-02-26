@@ -14,6 +14,7 @@ Performance: ~1000 items/seconde (pure regex, no LLM)
 """
 
 import re
+import threading
 from enum import Enum
 from typing import List, Optional, Dict, Any, Tuple
 from dataclasses import dataclass
@@ -384,12 +385,14 @@ class KeywordFilter:
 # ============================
 
 _filter_instance = None
+_filter_lock = threading.Lock()  # S4-1 FIX: thread-safe singleton
 
 def get_keyword_filter() -> KeywordFilter:
     """Get singleton filter instance"""
     global _filter_instance
-    if _filter_instance is None:
-        _filter_instance = KeywordFilter()
+    with _filter_lock:
+        if _filter_instance is None:
+            _filter_instance = KeywordFilter()
     return _filter_instance
 
 

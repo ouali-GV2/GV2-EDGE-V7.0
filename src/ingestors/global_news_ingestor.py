@@ -28,6 +28,7 @@ Architecture:
 import os
 import asyncio
 import aiohttp
+import threading
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional, Set
 from dataclasses import dataclass, field
@@ -328,14 +329,16 @@ class GlobalNewsIngestor:
 # ============================
 
 _ingestor_instance = None
+_ingestor_lock = threading.Lock()  # S4-1 FIX: thread-safe singleton
 
 def get_global_ingestor(universe: Set[str] = None) -> GlobalNewsIngestor:
     """Get singleton ingestor instance"""
     global _ingestor_instance
-    if _ingestor_instance is None:
-        _ingestor_instance = GlobalNewsIngestor(universe)
-    elif universe:
-        _ingestor_instance.set_universe(universe)
+    with _ingestor_lock:
+        if _ingestor_instance is None:
+            _ingestor_instance = GlobalNewsIngestor(universe)
+        elif universe:
+            _ingestor_instance.set_universe(universe)
     return _ingestor_instance
 
 

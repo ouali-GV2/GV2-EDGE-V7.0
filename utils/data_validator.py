@@ -43,7 +43,8 @@ def validate_event(event):
             logger.warning(f"Invalid event missing {r}")
             return False
 
-    if event["impact"] < 0 or event["impact"] > 1:
+    # S5-6 FIX: bearish events have negative impact (-1.0 to 0.0)
+    if event["impact"] < -1.0 or event["impact"] > 1.0:
         logger.warning("Event impact out of range")
         return False
 
@@ -84,7 +85,9 @@ def validate_signal(signal):
             logger.warning(f"Signal missing {r}")
             return False
 
-    valid_signals = ["BUY", "BUY_STRONG", "WATCH", "WATCH_EARLY", "HOLD"]
+    # S4-7 FIX: WATCH_EARLY renamed to EARLY_SIGNAL in V9; NO_SIGNAL is valid (no trade).
+    valid_signals = ["BUY", "BUY_STRONG", "WATCH", "EARLY_SIGNAL", "NO_SIGNAL", "HOLD",
+                     "WATCH_EARLY"]  # keep legacy alias for backward compat
     if signal["signal"] not in valid_signals:
         logger.warning(f"Unknown signal type: {signal['signal']}. Valid types: {valid_signals}")
         return False

@@ -11,7 +11,7 @@ Scanne les catalysts qui surviennent après la clôture du marché (16h-20h ET):
 Objectif: Détecter les movers du lendemain AVANT le gap d'ouverture.
 """
 
-from datetime import datetime, time
+from datetime import datetime, time, timezone
 import pytz
 from utils.logger import get_logger
 from utils.api_guard import safe_get
@@ -107,7 +107,7 @@ def scan_afterhours_news(tickers=None):
                 
                 if timestamp:
                     news_time = datetime.fromtimestamp(timestamp)
-                    age_hours = (datetime.utcnow() - news_time).total_seconds() / 3600
+                    age_hours = (datetime.now(timezone.utc) - news_time).total_seconds() / 3600
                     
                     if age_hours <= 4:  # Recent news
                         news_events.append(news)

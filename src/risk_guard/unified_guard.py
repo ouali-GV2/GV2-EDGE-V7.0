@@ -298,25 +298,28 @@ class UnifiedGuard:
             self._cache_assessment(assessment)
             return assessment
 
+        async def _noop():
+            return None
+
         # Run component assessments concurrently
         tasks = []
 
         if self.config.enable_dilution:
             tasks.append(self._assess_dilution(ticker, sec_filings))
         else:
-            tasks.append(asyncio.coroutine(lambda: None)())
+            tasks.append(_noop())
 
         if self.config.enable_compliance:
             tasks.append(self._assess_compliance(ticker, sec_filings))
         else:
-            tasks.append(asyncio.coroutine(lambda: None)())
+            tasks.append(_noop())
 
         if self.config.enable_halt:
             tasks.append(self._assess_halt(
                 ticker, current_price, volatility, normal_volatility
             ))
         else:
-            tasks.append(asyncio.coroutine(lambda: None)())
+            tasks.append(_noop())
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
 

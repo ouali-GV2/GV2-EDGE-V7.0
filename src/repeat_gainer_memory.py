@@ -9,7 +9,7 @@
 
 import sqlite3
 import math
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 import os
@@ -61,7 +61,7 @@ def init_db():
     """Initialize SQLite database for repeat gainer tracking"""
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     cursor = conn.cursor()
 
     # Create gainers history table
@@ -124,7 +124,7 @@ def record_gainer(record: GainerRecord) -> bool:
         True if recorded successfully
     """
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
 
         cursor.execute('''
@@ -165,7 +165,7 @@ def record_daily_top_gainers(date: date, gainers: List[Tuple[str, float, int]]) 
         True if recorded successfully
     """
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
 
         for rank, (ticker, gain_pct, volume) in enumerate(gainers, 1):
@@ -198,7 +198,7 @@ def get_ticker_history(ticker: str, days_back: int = 180) -> List[GainerRecord]:
         List of GainerRecords
     """
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
 
         cutoff = (datetime.now().date() - timedelta(days=days_back)).isoformat()
@@ -359,7 +359,7 @@ def get_repeat_runners(min_score: float = REPEAT_RUNNER_THRESHOLD) -> List[Repea
         List of RepeatGainerScores for qualifying tickers
     """
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
 
         # Get unique tickers with recent activity
@@ -442,30 +442,54 @@ def get_repeat_score_boost(ticker: str) -> float:
 
 def fetch_and_record_top_gainers():
     """
-    Fetch today's top gainers and record them
+    Fetch today's top gainers and record them.
 
-    Uses Finnhub or other data source to get top gainers.
-    Should be called daily after market close.
+    S3-7 FIX: Was a stub returning False. Now wired to TopGainersSource (C8 module)
+    which uses IBKR Scanner + Yahoo Finance as sources.
+    Called daily after market close (batch_processor.py or weekend_scheduler.py).
+
+    Returns:
+        True if at least one gainer was recorded
     """
-    from config import FINNHUB_API_KEY
-    import requests
+    import asyncio
+    import concurrent.futures
 
     try:
-        # Use Finnhub quote for top gainers (requires premium for full list)
-        # For now, we'll log a placeholder - actual implementation depends on data source
+        from src.top_gainers_source import get_top_gainers_source
 
-        logger.info("Fetching daily top gainers...")
+        logger.info("Fetching daily top gainers via TopGainersSource...")
 
-        # Example API call (would need actual endpoint)
-        # url = f"https://finnhub.io/api/v1/stock/market-status?token={FINNHUB_API_KEY}"
+        source = get_top_gainers_source()
 
-        # For production, integrate with:
-        # - Finnhub premium
-        # - Yahoo Finance scraping
-        # - IBKR scanner results
+        # fetch_top_gainers() is async — run it in a dedicated thread so this
+        # synchronous function works regardless of whether an event loop is running.
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _ex:
+            gainers = _ex.submit(
+                asyncio.run,
+                source.fetch_top_gainers(min_change_pct=10.0, min_volume=50_000)
+            ).result(timeout=30)
 
-        logger.warning("Top gainer fetching not implemented - requires data source integration")
-        return False
+        if not gainers:
+            logger.warning("TopGainersSource returned no gainers (market closed or API unavailable)")
+            return False
+
+        today = date.today()
+        recorded = 0
+
+        for g in gainers:
+            rec = GainerRecord(
+                ticker=g.ticker,
+                date=today,
+                gain_pct=g.change_pct,
+                volume=g.volume,
+                market_cap=getattr(g, "market_cap", 0) or 0,
+                catalyst=getattr(g, "catalyst_type", None),
+            )
+            if record_gainer(rec):
+                recorded += 1
+
+        logger.info(f"Recorded {recorded}/{len(gainers)} top gainers for {today}")
+        return recorded > 0
 
     except Exception as e:
         logger.error(f"Failed to fetch top gainers: {e}")
@@ -521,7 +545,7 @@ def import_historical_gainers(csv_path: str) -> int:
 def get_database_stats() -> Dict:
     """Get statistics about the repeat gainer database"""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
 
         # Total records

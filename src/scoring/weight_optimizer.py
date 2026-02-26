@@ -254,6 +254,21 @@ class WeightOptimizer:
             self._history.append(ws)
             self._save_history()
 
+            # S3-4 FIX: Also write active weights file that monster_score.py reads.
+            # Before: optimizer wrote to "data/monster_weights_history.json" (history)
+            # but monster_score.py reads "data/monster_score_weights.json" (active).
+            # They were different files → optimization had ZERO effect on scoring.
+            try:
+                active_path = Path("data/monster_score_weights.json")
+                active_path.parent.mkdir(parents=True, exist_ok=True)
+                active_path.write_text(json.dumps(best_weights, indent=2))
+                logger.info(f"Active weights written to {active_path}")
+                # Invalidate monster_score.py module-level cache so new weights load immediately
+                from src.scoring.monster_score import reload_weights
+                reload_weights()
+            except Exception as _e:
+                logger.warning(f"Could not write active weights file: {_e}")
+
             logger.info(
                 f"WEIGHTS OPTIMIZED: fitness {previous_fitness:.4f} -> {best_fitness:.4f} "
                 f"(+{improvement:.1f}%) | DR={metrics['detection_rate']:.2f} P={metrics['precision']:.2f}"
@@ -362,14 +377,21 @@ class WeightOptimizer:
         try:
             from src.signal_logger import get_signal_history
 
-            signals = get_signal_history(days_back=EVAL_LOOKBACK_DAYS)
-            for s in signals:
+            # S3-4 FIX: get_signal_history() returns a pd.DataFrame.
+            # Before: `for s in df` iterates COLUMN NAMES (strings), not rows.
+            # Fix: use iterrows() to get (index, Series) pairs.
+            signals_df = get_signal_history(days_back=EVAL_LOOKBACK_DAYS)
+
+            if signals_df is None or signals_df.empty:
+                return history
+
+            for _, s in signals_df.iterrows():
                 history.append({
                     "ticker": s.get("ticker"),
                     "monster_score": s.get("monster_score", 0),
-                    "components": s.get("components", {}),
+                    "components": {},  # not stored per-row; optimizer uses aggregate metrics
                     "was_top_gainer": s.get("actual_move_pct", 0) >= 30,
-                    "signal_type": s.get("signal"),
+                    "signal_type": s.get("signal_type"),
                     "actual_move_pct": s.get("actual_move_pct", 0),
                 })
         except Exception as e:

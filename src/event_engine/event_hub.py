@@ -13,7 +13,7 @@ Cache TTL: 15 min. Singleton: get_event_hub()
 
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from utils.cache import Cache
 from utils.logger import get_logger
@@ -56,7 +56,7 @@ def fetch_company_news(ticker, days_back=3):
     """
     Fetch ticker-specific news (MUCH better than general news)
     """
-    today = datetime.utcnow()
+    today = datetime.now(timezone.utc)
     from_date = (today - timedelta(days=days_back)).strftime("%Y-%m-%d")
     to_date = today.strftime("%Y-%m-%d")
 
@@ -102,7 +102,7 @@ def fetch_earnings_events(days_forward=7):
     """
     Fetch upcoming earnings (major catalyst)
     """
-    today = datetime.utcnow()
+    today = datetime.now(timezone.utc)
     from_date = today.strftime("%Y-%m-%d")
     to_date = (today + timedelta(days=days_forward)).strftime("%Y-%m-%d")
 
@@ -188,7 +188,7 @@ def fetch_breaking_news(category="general"):
 def proximity_boost(event_date):
     try:
         d = datetime.strptime(event_date, "%Y-%m-%d")
-        delta = abs((d - datetime.utcnow()).days)
+        delta = abs((d - datetime.now(timezone.utc)).days)
 
         if delta <= 1:
             return 1.5  # ↑ Increased (today/tomorrow = critical)
@@ -272,7 +272,7 @@ def build_events(tickers=None, force_refresh=False):
                 parsed_events.append({
                     "ticker": event["ticker"],
                     "type": event["type"],
-                    "date": event.get("date", datetime.utcnow().strftime("%Y-%m-%d")),
+                    "date": event.get("date", datetime.now(timezone.utc).strftime("%Y-%m-%d")),
                     "impact": 0.8 if event["type"] == "earnings" else 0.6,
                     "category": event["type"],
                     "metadata": event
@@ -287,7 +287,14 @@ def build_events(tickers=None, force_refresh=False):
 
             boost = proximity_boost(e.get("date", ""))
 
-            e["boosted_impact"] = min(1.0, e.get("impact", 0.5) * boost)
+            raw_impact = e.get("impact", 0.5)
+            if raw_impact < 0:
+                # S5-6: bearish event — apply boost to magnitude, preserve sign, clamp to [-1, 0]
+                e["boosted_impact"] = max(-1.0, raw_impact * boost)
+                e.setdefault("is_bearish", True)
+            else:
+                e["boosted_impact"] = min(1.0, raw_impact * boost)
+                e.setdefault("is_bearish", False)
 
             boosted_events.append(e)
 
