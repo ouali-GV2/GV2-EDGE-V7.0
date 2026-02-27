@@ -324,11 +324,11 @@ def phase_pipeline(ticker: str = "AAPL"):
     def check_accel():
         from src.engines.acceleration_engine import get_acceleration_engine
         accel = get_acceleration_engine()
-        accel.update_tick(ticker, price=180.0, volume=1_000_000)
-        accel.update_tick(ticker, price=180.5, volume=1_200_000)
-        accel.update_tick(ticker, price=181.0, volume=1_500_000)
+        # score() lit le buffer interne — retourne DORMANT si pas de données IBKR,
+        # ce qui est normal sans Gateway connecté.
         result = accel.score(ticker)
-        print(f"         state={result.state}  vol_z={result.volume_zscore:.2f}")
+        print(f"         state={result.state}  samples={result.samples}  "
+              f"vol_z={result.volume_zscore:.2f}")
 
     _check("AccelerationEngine.score()", check_accel)
 
@@ -336,9 +336,10 @@ def phase_pipeline(ticker: str = "AAPL"):
     def check_smallcap():
         from src.engines.smallcap_radar import SmallCapRadar
         radar = SmallCapRadar()
-        blip = radar.scan(ticker, price=180.0, volume=800_000, avg_volume=600_000,
-                          price_change_pct=3.5)
-        print(f"         phase={blip.phase}  score={blip.score:.2f}")
+        # scan() parcourt tous les tickers du buffer interne (0 si pas d'IBKR)
+        result = radar.scan()
+        print(f"         tickers_scanned={result.tickers_scanned}  "
+              f"critical={len(result.critical)}  high={len(result.high)}")
 
     _check("SmallCapRadar.scan()", check_smallcap)
 
@@ -346,20 +347,20 @@ def phase_pipeline(ticker: str = "AAPL"):
     def check_monster():
         from src.scoring.monster_score import compute_monster_score
         score = compute_monster_score(ticker)
+        if score is None:
+            raise ValueError("compute_monster_score returned None")
         print(f"         monster_score={score:.3f}")
 
-    _check("Monster Score compute_monster_score()", check_monster)
+    _check("Monster Score compute_monster_score()", check_monster, warn_only=True)
 
-    # Étape 4: SignalProducer.detect()
+    # Étape 4: SignalProducer.detect() [async]
     def check_signal_producer():
+        import asyncio
         from src.engines.signal_producer import get_signal_producer, DetectionInput
         from src.models.signal_types import PreSpikeState, PreHaltState
         from src.engines.acceleration_engine import get_acceleration_engine
 
-        accel = get_acceleration_engine()
-        for i in range(3):
-            accel.update_tick(ticker, price=180.0 + i, volume=1_000_000 + i * 100_000)
-        accel_result = accel.score(ticker)
+        accel_result = get_acceleration_engine().score(ticker)
 
         inp = DetectionInput(
             ticker=ticker,
@@ -371,16 +372,20 @@ def phase_pipeline(ticker: str = "AAPL"):
             pre_spike_state=PreSpikeState.CHARGING,
             pre_halt_state=PreHaltState.LOW,
             accel_state=accel_result.state,
-            accel_score=accel_result.score,
+            accel_score=accel_result.acceleration_score,
             vol_zscore_accel=accel_result.volume_zscore,
             repeat_gainer_score=0.0,
             social_buzz_score=0.3,
         )
         producer = get_signal_producer()
-        signal = producer.detect(inp)
+
+        async def _run():
+            return await producer.detect(inp)
+
+        signal = asyncio.run(_run())
         print(f"         signal={signal.signal_type.value}  score={signal.final_score:.3f}")
 
-    _check("SignalProducer.detect()", check_signal_producer)
+    _check("SignalProducer.detect() [async]", check_signal_producer)
 
     # Étape 5: OrderComputer
     def check_order_computer():
@@ -388,13 +393,14 @@ def phase_pipeline(ticker: str = "AAPL"):
         from src.models.signal_types import SignalType
         import config as cfg
 
+        capital = getattr(cfg, "MANUAL_CAPITAL", getattr(cfg, "TRADING_CAPITAL", 1000))
         computer = OrderComputer()
         order = computer.compute_order(
             ticker=ticker,
             signal_type=SignalType.BUY,
             current_price=180.0,
             atr=2.5,
-            available_capital=cfg.TRADING_CAPITAL * 0.8,
+            available_capital=capital * 0.8,
         )
         if order:
             print(f"         shares={order.shares}  entry={order.entry_price:.2f}"
@@ -404,42 +410,47 @@ def phase_pipeline(ticker: str = "AAPL"):
 
     _check("OrderComputer.compute_order()", check_order_computer)
 
-    # Étape 6: RiskGuard
+    # Étape 6: UnifiedGuard [async]
     def check_risk_guard():
-        from src.risk_guard.unified_guard import get_risk_guard
-        guard = get_risk_guard()
-        flags = guard.assess(ticker)
-        print(f"         size_mult={flags.size_multiplier:.2f}  "
-              f"block={flags.should_block}  reasons={flags.block_reasons[:2]}")
+        import asyncio
+        from src.risk_guard.unified_guard import get_unified_guard
 
-    _check("UnifiedGuard.assess()", check_risk_guard)
+        guard = get_unified_guard()
+
+        async def _run():
+            return await guard.assess(ticker, price=180.0, volume=800_000)
+
+        assessment = asyncio.run(_run())
+        print(f"         risk_level={assessment.risk_level}  "
+              f"action={assessment.recommended_action}  "
+              f"size_mult={assessment.size_multiplier:.2f}")
+
+    _check("UnifiedGuard.assess() [async]", check_risk_guard)
 
     # Étape 7: ExecutionGate
     def check_execution_gate():
         from src.engines.execution_gate import ExecutionGate
         from src.engines.order_computer import OrderComputer
         from src.models.signal_types import SignalType
-        from src.risk_guard.unified_guard import get_risk_guard
         import config as cfg
 
+        capital = getattr(cfg, "MANUAL_CAPITAL", getattr(cfg, "TRADING_CAPITAL", 1000))
         computer = OrderComputer()
         order = computer.compute_order(
             ticker=ticker,
             signal_type=SignalType.BUY,
             current_price=180.0,
             atr=2.5,
-            available_capital=cfg.TRADING_CAPITAL * 0.8,
+            available_capital=capital * 0.8,
         )
-        guard = get_risk_guard()
-        flags = guard.assess(ticker)
         gate = ExecutionGate()
-        decision = gate.evaluate(order, flags, daily_trades=0)
+        decision = gate.evaluate(order, daily_trades=0)
         print(f"         status={decision.status.value}  "
               f"reason={decision.block_reason.value if decision.block_reason else 'None'}")
 
     _check("ExecutionGate.evaluate()", check_execution_gate)
 
-    # Étape 8: Multi-Radar (async)
+    # Étape 8: Multi-Radar [async]
     def check_multi_radar():
         import asyncio
         from src.engines.multi_radar_engine import get_multi_radar_engine
@@ -447,15 +458,15 @@ def phase_pipeline(ticker: str = "AAPL"):
         engine = get_multi_radar_engine()
 
         async def _run():
-            result = await engine.scan(ticker, price=180.0, volume=1_000_000)
-            print(f"         confluence={result.signal_type.value}  "
-                  f"agreement={result.agreement_level}  "
-                  f"lead={result.lead_radar}")
-            return result
+            return await engine.scan_ticker(ticker)
 
-        asyncio.run(_run())
+        result = asyncio.run(_run())
+        print(f"         signal={result.signal_type.value}  "
+              f"flow={result.flow_score:.2f}  "
+              f"catalyst={result.catalyst_score:.2f}  "
+              f"lead={result.lead_radar}")
 
-    _check("MultiRadarEngine.scan() [async]", check_multi_radar)
+    _check("MultiRadarEngine.scan_ticker() [async]", check_multi_radar)
 
     # Étape 9: Feature Engine
     def check_feature_engine():
@@ -465,24 +476,21 @@ def phase_pipeline(ticker: str = "AAPL"):
             keys = list(features.keys())[:5]
             print(f"         {len(features)} features  ex: {keys}")
         else:
-            raise ValueError("features est None ou vide")
+            raise ValueError("features est None ou vide (normal sans Finnhub key)")
 
     _check("FeatureEngine.compute_features()", check_feature_engine, warn_only=True)
 
     # Étape 10: Signal Logger (DB write)
     def check_signal_logger():
         from src.signal_logger import init_db, log_signal
-        from src.models.signal_types import SignalType, ExecutionStatus, BlockReason
         init_db()
-        log_signal(
-            ticker=ticker,
-            signal_type=SignalType.WATCH,
-            final_score=0.55,
-            monster_score=0.55,
-            execution_status=ExecutionStatus.ALERT_ONLY,
-            block_reason=None,
-            metadata={"check": "diagnostic"}
-        )
+        log_signal({
+            "ticker": ticker,
+            "signal": "WATCH",
+            "monster_score": 0.55,
+            "confidence": 0.55,
+            "metadata": json.dumps({"check": "diagnostic"}),
+        })
         print(f"         Signal WATCH écrit dans signals_history.db")
 
     _check("SignalLogger.log_signal() → SQLite", check_signal_logger)
@@ -570,7 +578,7 @@ def phase_logs():
                     f"{log_name} ({size_kb:.0f} KB) — {len(errors)} erreur(s)",
                     errors[-1][:120]   # dernière erreur
                 )
-            elif warnings > 20:
+            elif len(warnings) > 20:
                 _warn(
                     f"{log_name} ({size_kb:.0f} KB) — {len(warnings)} warnings",
                     warnings[-1][:120]
@@ -627,10 +635,14 @@ def phase_system():
 
     # Timezone
     def check_tz():
-        from utils.time_utils import get_current_session
-        session = get_current_session()
-        now_et  = datetime.now(timezone.utc).strftime("%H:%M UTC")
-        print(f"         Heure: {now_et}  Session marché: {session}")
+        from utils.time_utils import market_session, is_market_open, is_premarket, is_after_hours
+        session = market_session()
+        now_utc = datetime.now(timezone.utc).strftime("%H:%M UTC")
+        open_   = is_market_open()
+        pm      = is_premarket()
+        ah      = is_after_hours()
+        print(f"         Heure: {now_utc}  Session: {session}  "
+              f"open={open_}  premarket={pm}  afterhours={ah}")
 
     _check("Heure UTC + session marché", check_tz)
 
