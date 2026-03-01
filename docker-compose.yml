@@ -28,6 +28,23 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: unless-stopped
+
+    volumes:
+      - ollama-data:/root/.ollama
+
+    mem_limit: 5g
+    mem_reservation: 3g
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   gv2-edge:
     build: .
     container_name: gv2-edge
@@ -35,6 +52,8 @@ services:
 
     depends_on:
       ibgateway:
+        condition: service_started
+      ollama:
         condition: service_started
 
     ports:
@@ -73,4 +92,6 @@ volumes:
   ibgateway-jts:
     driver: local
   ibgateway-ibc:
+    driver: local
+  ollama-data:
     driver: local

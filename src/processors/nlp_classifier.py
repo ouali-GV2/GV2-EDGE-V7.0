@@ -33,7 +33,7 @@ import sqlite3
 from openai import AsyncOpenAI
 
 from utils.logger import get_logger
-from config import GROK_API_KEY, GROK_API_URL
+from config import GROK_API_KEY, GROK_API_URL, ENABLE_OLLAMA_BATCH
 
 logger = get_logger("NLP_CLASSIFIER")
 
@@ -348,32 +348,35 @@ class NLPClassifier:
                 logger.debug(f"Cache hit for: {headline[:50]}...")
                 return cached
 
-        # If no Grok client, use fallback
+        # 1. Ollama local (batch — gratuit, 0 latence réseau)
+        if ENABLE_OLLAMA_BATCH:
+            ollama_result = self._try_ollama(headline, summary)
+            if ollama_result is not None:
+                if use_cache:
+                    self.cache.set(headline, summary, ollama_result)
+                return ollama_result
+
+        # 2. Grok/Groq API (fallback si Ollama down)
         if not self.client:
             return self._fallback_classify(headline, summary)
 
-        # Circuit breaker: skip API if quota exhausted
         import time as _time
         if _time.time() < self._quota_exhausted_until:
             return self._fallback_classify(headline, summary)
 
-        # Call Grok API
         try:
             async with self.semaphore:
                 result = await self._call_grok(headline, summary)
-
-            # Cache result
             if use_cache:
                 self.cache.set(headline, summary, result)
-
             return result
 
         except Exception as e:
             import time as _time
             from openai import RateLimitError
             if isinstance(e, RateLimitError):
-                self._quota_exhausted_until = _time.time() + 14400  # skip for 4h (credits exhausted)
-                logger.warning(f"Grok quota exhausted — using fallback for 5 min")
+                self._quota_exhausted_until = _time.time() + 14400
+                logger.warning("Grok quota exhausted — using fallback")
             else:
                 logger.warning(f"Grok API error [{type(e).__name__}]: {e}")
             return self._fallback_classify(headline, summary)
@@ -398,6 +401,35 @@ class NLPClassifier:
             except Exception:
                 pass
         return {}
+
+    def _try_ollama(self, headline: str, summary: str) -> Optional[ClassificationResult]:
+        """Tente la classification via Ollama local (synchrone, batch only)."""
+        try:
+            from src.nlp_local import call_ollama
+            prompt = CLASSIFICATION_PROMPT.format(
+                headline=headline,
+                summary=summary[:500] if summary else "N/A"
+            )
+            data = call_ollama(CLASSIFICATION_PROMPT, f"Headline: {headline}\nSummary: {summary[:500] or 'N/A'}")
+            if not data:
+                return None
+            event_type_str = data.get("event_type", "NONE")
+            try:
+                event_type = EventType[event_type_str]
+            except KeyError:
+                event_type = EventType.NONE
+            impact = EVENT_IMPACT.get(event_type, 0.0)
+            return ClassificationResult(
+                event_type=event_type.value,
+                impact=impact,
+                tier=get_tier(event_type),
+                confidence=data.get("confidence", 0.5),
+                reasoning=data.get("reasoning", "ollama-local"),
+                from_cache=False,
+            )
+        except Exception as e:
+            logger.debug(f"Ollama classify error: {e}")
+            return None
 
     async def _call_grok(self, headline: str, summary: str) -> ClassificationResult:
         """Make Grok API call"""

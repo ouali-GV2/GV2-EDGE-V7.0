@@ -13,6 +13,11 @@ GROK_API_URL = os.getenv("GROK_API_URL", "https://api.x.ai/v1")
 # Principal NLP — Grok/xAI utilisé en fallback
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GROQ_API_URL = os.getenv("GROQ_API_URL", "https://api.groq.com/openai/v1")
+
+# Ollama — LLM local pour tâches BATCH (weekend, audits). Aucun appel réseau, 0 coût.
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")
+OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL",    "llama3.2:3b")
+ENABLE_OLLAMA_BATCH = True  # False = skip Ollama, utilise Groq directement
 FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "")
 
 # ========= IBKR CONNECTION =========
