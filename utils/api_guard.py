@@ -338,7 +338,7 @@ def pool_safe_post(
         from src.api_pool.request_router import Priority as P
         priority = P.STANDARD
 
-    # Grok token bucket — enforce 8 req/min before attempting any key
+    # Grok token bucket — enforce 8 req/min (Groq a son propre circuit breaker dans _call_groq)
     if provider in ("grok", "xai"):
         if not _grok_token_bucket_wait(timeout=70.0):
             api_log.warning(
@@ -360,7 +360,7 @@ def pool_safe_post(
 
         merged_headers = dict(headers or {})
 
-        if provider in ("grok", "xai"):
+        if provider in ("grok", "xai", "groq"):
             merged_headers["Authorization"] = f"Bearer {acq.key}"
         elif provider == "finnhub":
             merged_headers["X-Finnhub-Token"] = acq.key
