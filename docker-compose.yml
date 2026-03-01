@@ -36,6 +36,9 @@ services:
     volumes:
       - ollama-data:/root/.ollama
 
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+
     mem_limit: 5g
     mem_reservation: 3g
 
