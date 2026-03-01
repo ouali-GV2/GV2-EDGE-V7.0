@@ -7,7 +7,9 @@ Responsive : CSS grid + media queries (mobile / tablet / desktop)
 """
 
 import sys
+import time as _time_mod
 import streamlit as st
+import streamlit.components.v1 as stc
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -1515,58 +1517,134 @@ with tab5:
 # TAB 6 — LIVE LOGS
 # ─────────────────────────────
 
+def _log_color(line: str):
+    """Returns (text_color, bg_color) for a log line."""
+    if   "| ERROR |" in line:                                                   return "#f87171","rgba(239,68,68,.10)"
+    elif "| WARNING |" in line:                                                  return "#fbbf24","rgba(251,191,36,.07)"
+    elif "EVENT=CALL_OK" in line or "EVENT=CIRCUIT_BREAKER_OFF" in line:        return "#34d399","rgba(52,211,153,.07)"
+    elif any(e in line for e in ("EVENT=TIMEOUT","EVENT=CIRCUIT_BREAKER_ON",
+             "EVENT=CALL_FAIL","EVENT=SLOW_INFERENCE",
+             "EVENT=PARSE_FAIL","EVENT=FALLBACK_GROQ")):                         return "#fb923c","rgba(251,146,60,.07)"
+    elif "Health OK" in line or "reconnected" in line or "STARTED" in line:     return "#34d399","transparent"
+    else:                                                                        return "#94a3b8","transparent"
+
+
 with tab6:
     st.markdown("### 📋 Live System Logs")
     log_files=sorted(f.name for f in LOGS_DIR.glob("*.log")) if LOGS_DIR.exists() else []
-    lc1,lc2=st.columns([1,3])
     PRIORITY_LOGS=["main.log","signal_producer.log","multi_radar.log",
                    "execution_gate.log","ibkr_connector.log","api_monitor.log",
                    "ollama.log","telegram_alerts.log"]
+    lc1,lc2=st.columns([1,3])
+
     with lc1:
         ordered=[l for l in PRIORITY_LOGS if l in log_files]+[l for l in log_files if l not in PRIORITY_LOGS]
-        selected_log=st.selectbox("Log file",ordered,index=0) if log_files else None
-        n_lines=st.select_slider("Lines",[50,100,200,500],value=100)
+        selected_log=st.selectbox("📁 Log file",ordered,index=0) if log_files else None
+        n_lines=st.select_slider("Lines",[50,100,200,500],value=200)
         level_filter=st.multiselect("Level",["INFO","WARNING","ERROR","DEBUG"],default=["INFO","WARNING","ERROR"])
-        keyword=st.text_input("Keyword",placeholder="BUY_STRONG, ERROR…")
-        st.markdown("---"); st.markdown("**Sizes**")
-        for lf in ordered[:12]:
+        keyword=st.text_input("🔍 Keyword",placeholder="TIMEOUT, BUY_STRONG…")
+        newest_first=st.toggle("Newest first",value=True,help="Most recent lines at top")
+
+        # Level counts
+        st.markdown("---")
+        if selected_log:
+            _all=load_log_tail(selected_log,500)
+            _ne=sum(1 for l in _all if "| ERROR |" in l)
+            _nw=sum(1 for l in _all if "| WARNING |" in l)
+            _ni=sum(1 for l in _all if "| INFO |" in l)
+            st.markdown(
+                f"<div style='font-size:.75rem;line-height:2.2'>"
+                f"<span style='color:#f87171'>● ERROR &nbsp;{_ne}</span><br>"
+                f"<span style='color:#fbbf24'>● WARN &nbsp;{_nw}</span><br>"
+                f"<span style='color:#94a3b8'>● INFO &nbsp;{_ni}</span>"
+                f"</div>",unsafe_allow_html=True)
+
+        # File list with sizes
+        st.markdown("<div style='font-size:.72rem;color:#64748b;margin-top:.5rem'>Files</div>",unsafe_allow_html=True)
+        for lf in ordered[:16]:
             try:
                 sz=(LOGS_DIR/lf).stat().st_size
                 sz_str=f"{sz/1024:.0f}KB" if sz<1048576 else f"{sz/1048576:.1f}MB"
-                st.caption(f"{'**' if lf==selected_log else ''}{lf}{'**' if lf==selected_log else ''} — {sz_str}")
+                active=lf==selected_log
+                col="#60a5fa" if active else "#64748b"
+                pre="▶ " if active else "&nbsp;&nbsp;"
+                st.markdown(
+                    f"<div style='font-size:.68rem;color:{col};padding:.08rem 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>"
+                    f"{pre}{lf} <span style='color:#475569'>{sz_str}</span></div>",
+                    unsafe_allow_html=True)
             except Exception: pass
 
     with lc2:
         if selected_log:
             lines=load_log_tail(selected_log,n_lines)
             if level_filter: lines=[l for l in lines if any(lv in l for lv in level_filter)]
-            if keyword: lines=[l for l in lines if keyword.lower() in l.lower()]
-            st.markdown(f"#### `{selected_log}` — {len(lines)} lines")
-            html_lines=[]
-            for line in lines:
-                esc=line.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
-                if "| ERROR |" in line or ("ERROR" in line[:50] and "|" in line):
-                    html_lines.append(f'<span class="log-error">{esc}</span>')
-                elif "| WARNING |" in line or ("WARNING" in line[:50] and "|" in line):
-                    html_lines.append(f'<span class="log-warn">{esc}</span>')
-                elif "OK(" in line or "STARTED" in line or "✅" in line:
-                    html_lines.append(f'<span class="log-ok">{esc}</span>')
-                else:
-                    html_lines.append(f'<span class="log-info">{esc}</span>')
-            st.markdown(f'<div class="log-container">{"".join(html_lines)}</div>',unsafe_allow_html=True)
-        else:
-            st.info("Select a log file")
+            if keyword:      lines=[l for l in lines if keyword.lower() in l.lower()]
+            if newest_first: lines=list(reversed(lines))
 
-    st.markdown("---"); st.markdown("#### ⚡ Recent ERRORs — all logs")
+            # Last-modified indicator
+            try:
+                mtime=(LOGS_DIR/selected_log).stat().st_mtime
+                age=int(_time_mod.time()-mtime)
+                age_str=f"{age}s ago" if age<60 else f"{age//60}m {age%60}s ago"
+                dot_col="#34d399" if age<15 else "#fbbf24" if age<60 else "#f87171"
+            except Exception:
+                age_str="?"; dot_col="#94a3b8"
+
+            st.markdown(
+                f"<div style='display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem'>"
+                f"<code style='font-size:.8rem'>{selected_log}</code>"
+                f"<span style='background:#1e293b;border-radius:4px;padding:.1rem .4rem;"
+                f"font-size:.65rem;color:#64748b'>{len(lines)} lines</span>"
+                f"<span style='margin-left:auto;font-size:.65rem;color:{dot_col}'>⬤ updated {age_str}</span>"
+                f"</div>",unsafe_allow_html=True)
+
+            # Build HTML log lines
+            row_divs=[]
+            for line in lines:
+                esc=line.rstrip("\n\r").replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
+                if not esc.strip(): continue
+                col,bg=_log_color(line)
+                row_divs.append(
+                    f'<div style="color:{col};background:{bg};padding:.06rem .4rem;'
+                    f'border-radius:2px;margin:.3px 0;font-size:.67rem;line-height:1.55;'
+                    f'white-space:pre-wrap;word-break:break-all">{esc}</div>')
+
+            # Auto-scroll JS fires only in oldest-first mode (newest already at top)
+            scroll_js="document.getElementById('lb').scrollTop=document.getElementById('lb').scrollHeight;" if not newest_first else ""
+
+            log_html=(
+                "<html><head><style>"
+                "body{margin:0;padding:0;background:#060a10}"
+                "#lb{height:462px;overflow-y:auto;background:#060a10;"
+                "border:1px solid #1e293b;border-radius:10px;padding:.75rem;"
+                "font-family:'JetBrains Mono',Consolas,monospace}"
+                "</style></head><body>"
+                f"<div id='lb'>{''.join(row_divs)}</div>"
+                f"<script>{scroll_js}</script>"
+                "</body></html>"
+            )
+            stc.html(log_html,height=480)
+        else:
+            st.info("No log files found in data/logs/")
+
+    # Cross-log ERROR panel
+    st.markdown("---")
+    st.markdown("#### ⚡ Recent ERRORs — all logs")
     if log_files:
         err_lines=[]
         for lf in log_files:
-            for line in load_log_tail(lf,80):
-                if "| ERROR |" in line or ("ERROR" in line[:50] and "|" in line):
+            for line in load_log_tail(lf,50):
+                if "| ERROR |" in line:
                     err_lines.append(f"[{lf}] {line.strip()}")
         if err_lines:
-            html="".join([f'<div style="font-family:JetBrains Mono,monospace;font-size:.7rem;color:#ef4444;padding:.1rem 0;">{l.replace("<","&lt;")}</div>' for l in err_lines[-20:]])
-            st.markdown(f'<div class="log-container" style="height:220px;">{html}</div>',unsafe_allow_html=True)
+            err_divs="".join(
+                f'<div style="color:#f87171;font-size:.68rem;line-height:1.55;'
+                f'padding:.15rem 0;border-bottom:1px solid #1a1a2e;'
+                f'white-space:pre-wrap;word-break:break-all">'
+                f'{l.replace("&","&amp;").replace("<","&lt;")}</div>'
+                for l in err_lines[-20:])
+            st.markdown(f'<div class="log-container" style="height:220px">{err_divs}</div>',
+                        unsafe_allow_html=True)
         else:
             st.success("No recent errors ✅")
 
