@@ -37,7 +37,7 @@ st.set_page_config(
     page_title="GV2-EDGE V9.0",
     page_icon="🎯",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 # ============================
@@ -62,20 +62,18 @@ st.markdown("""
 
 .stApp { background: linear-gradient(135deg,#0a0e17 0%,#0f172a 100%); font-family:'Outfit',sans-serif; }
 #MainMenu, footer, header { visibility:hidden; }
-/* Fixed sidebar — always visible, no collapse button */
-section[data-testid="stSidebar"] {
-    position: fixed !important;
-    top: 0 !important;
-    left: 0 !important;
-    height: 100vh !important;
-    z-index: 999 !important;
-    transform: none !important;
-    overflow-y: auto !important;
+/* Hide sidebar entirely — controls moved to top bar */
+section[data-testid="stSidebar"],
+[data-testid="collapsedControl"] { display: none !important; }
+/* Controls top bar */
+.ctrl-bar {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: .5rem .8rem;
+    margin-bottom: .8rem;
+    display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
 }
-/* Hide both the close button (inside sidebar) and the collapsed toggle (outside) */
-[data-testid="collapsedControl"],
-button[title="Close sidebar"],
-button[aria-label="Close sidebar"] { display: none !important; }
 h1,h2,h3 { font-family:'Outfit',sans-serif !important; font-weight:600 !important; color:var(--text) !important; }
 h1 {
     font-size:clamp(1.4rem,3vw,2.2rem) !important;
@@ -497,70 +495,87 @@ def chart_api_latency(lines: list[str]):
 
 
 # ============================
-# SIDEBAR
+# ============================
+# TOP CONTROLS BAR
 # ============================
 
-with st.sidebar:
-    st.markdown("## ⚙️ Controls")
-    auto_refresh = st.toggle("🔄 Auto Refresh", value=True)
-    refresh_sec  = st.select_slider("Interval (s)",[10,15,30,60,120],value=30) if auto_refresh else 30
-    st.divider()
-    st.markdown("### 🔍 Filters")
-    hours_back    = st.selectbox("Time Range",[6,12,24,48,168],index=2,
-        format_func=lambda x: f"Last {x}h" if x<168 else "Last 7 days")
-    signal_filter = st.multiselect("Signal Types",
-        ["BUY_STRONG","BUY","WATCH","EARLY_SIGNAL"],default=["BUY_STRONG","BUY","EARLY_SIGNAL"])
-    min_score     = st.slider("Min Score",0.0,1.0,0.40,0.05)
-    st.divider()
-    st.markdown("### 🚀 Actions")
-    c1,c2 = st.columns(2)
-    with c1:
-        if st.button("📊 Audit",use_container_width=True):
-            with st.spinner("Running..."):
-                try:
-                    from daily_audit import run_daily_audit
-                    run_daily_audit(send_telegram=False); st.success("Done!")
-                except Exception as e: st.error(str(e))
-    with c2:
-        if st.button("🔄 Refresh",use_container_width=True):
-            st.cache_data.clear(); st.rerun()
-    st.divider()
-    st.markdown("### 🛡️ APIs")
-    status = get_system_status()
-    for k,ok in status.items():
-        cls = "pill-ok" if ok else "pill-err"
-        st.markdown(f'<span class="pill {cls}">{"🟢" if ok else "🔴"} {k.upper()}</span>',unsafe_allow_html=True)
-    ibkr_info = get_ibkr_info()
-    if ibkr_info:
-        st.divider(); st.markdown("### 🔌 IBKR")
-        state=ibkr_info.get("state","?")
-        icons={"CONNECTED":"🟢","RECONNECTING":"🟡","DISCONNECTED":"🔴","CONNECTING":"🟡","FAILED":"🔴"}
-        st.markdown(f"{icons.get(state,'⚪')} **{state}**")
-        if ibkr_info.get("connected"):
-            up=ibkr_info.get("uptime_seconds",0); lat=ibkr_info.get("heartbeat_latency_ms",0)
-            ustr=f"{up/3600:.1f}h" if up>=3600 else f"{up/60:.0f}min"
-            st.caption(f"Up: {ustr}  Lat: {lat:.0f}ms")
-    st.divider(); st.markdown("### 🧠 V9 Modules")
-    try:
-        from config import (ENABLE_MULTI_RADAR,ENABLE_ACCELERATION_ENGINE,ENABLE_SMALLCAP_RADAR,
-            ENABLE_PRE_HALT_ENGINE,ENABLE_RISK_GUARD,ENABLE_MARKET_MEMORY,
-            ENABLE_CATALYST_V3,ENABLE_PRE_SPIKE_RADAR)
-        mods={"Signal Producer (L1)":True,"Order Computer (L2)":True,"Execution Gate (L3)":True,
-              "Multi-Radar V9":ENABLE_MULTI_RADAR,"Acceleration V8":ENABLE_ACCELERATION_ENGINE,
-              "SmallCap Radar":ENABLE_SMALLCAP_RADAR,"Pre-Halt Engine":ENABLE_PRE_HALT_ENGINE,
-              "Risk Guard V8":ENABLE_RISK_GUARD,"Market Memory":ENABLE_MARKET_MEMORY,
-              "Catalyst V3":ENABLE_CATALYST_V3,"Pre-Spike Radar":ENABLE_PRE_SPIKE_RADAR}
-    except Exception:
-        mods={"Signal Producer":True,"Order Computer":True,"Execution Gate":True}
-    for name,active in mods.items():
-        st.markdown(f"{'🟢' if active else '⚫'} {name}")
-    st.divider()
-    try:
-        from zoneinfo import ZoneInfo
-        _et=datetime.now(ZoneInfo("America/New_York"))
-    except Exception:
-        _et=datetime.now(timezone.utc)-timedelta(hours=4)
-    st.caption(f"v9.0  •  {_et.strftime('%H:%M:%S')} ET")
+# Row 1 — Filters + actions (always visible)
+cb1,cb2,cb3,cb4,cb5,cb6,cb7 = st.columns([1,1,2,3,1.5,1,1])
+with cb1:
+    auto_refresh = st.toggle("🔄 Auto", value=True, help="Auto refresh")
+with cb2:
+    refresh_sec = st.selectbox("⏱", [10,30,60,120], index=1,
+        format_func=lambda x: f"{x}s", label_visibility="collapsed") if auto_refresh else 30
+with cb3:
+    hours_back = st.selectbox("🕐 Période",
+        [6,12,24,48,168], index=2,
+        format_func=lambda x: f"Last {x}h" if x<168 else "Last 7d",
+        label_visibility="visible")
+with cb4:
+    signal_filter = st.multiselect("📡 Signaux",
+        ["BUY_STRONG","BUY","WATCH","EARLY_SIGNAL"],
+        default=["BUY_STRONG","BUY","EARLY_SIGNAL"],
+        label_visibility="visible")
+with cb5:
+    min_score = st.slider("📊 Score min", 0.0, 1.0, 0.40, 0.05, label_visibility="visible")
+with cb6:
+    if st.button("📊 Audit", use_container_width=True):
+        with st.spinner("Running..."):
+            try:
+                from daily_audit import run_daily_audit
+                run_daily_audit(send_telegram=False); st.success("Done!")
+            except Exception as e: st.error(str(e))
+with cb7:
+    if st.button("🔄 Refresh", use_container_width=True):
+        st.cache_data.clear(); st.rerun()
+
+# Row 2 — Status expanders (collapsed by default)
+ex1, ex2, ex3 = st.columns(3)
+with ex1:
+    with st.expander("🛡️ APIs & IBKR"):
+        status = get_system_status()
+        cols_s = st.columns(2)
+        for i,(k,ok) in enumerate(status.items()):
+            cls = "pill-ok" if ok else "pill-err"
+            cols_s[i%2].markdown(
+                f'<span class="pill {cls}">{"🟢" if ok else "🔴"} {k.upper()}</span>',
+                unsafe_allow_html=True)
+        ibkr_info = get_ibkr_info()
+        if ibkr_info:
+            state = ibkr_info.get("state","?")
+            icons = {"CONNECTED":"🟢","RECONNECTING":"🟡","DISCONNECTED":"🔴","CONNECTING":"🟡","FAILED":"🔴"}
+            st.markdown(f"{icons.get(state,'⚪')} IBKR **{state}**")
+            if ibkr_info.get("connected"):
+                up  = ibkr_info.get("uptime_seconds",0)
+                lat = ibkr_info.get("heartbeat_latency_ms",0)
+                ustr = f"{up/3600:.1f}h" if up>=3600 else f"{up/60:.0f}min"
+                st.caption(f"Up: {ustr}  Lat: {lat:.0f}ms")
+with ex2:
+    with st.expander("🧠 V9 Modules"):
+        try:
+            from config import (ENABLE_MULTI_RADAR,ENABLE_ACCELERATION_ENGINE,ENABLE_SMALLCAP_RADAR,
+                ENABLE_PRE_HALT_ENGINE,ENABLE_RISK_GUARD,ENABLE_MARKET_MEMORY,
+                ENABLE_CATALYST_V3,ENABLE_PRE_SPIKE_RADAR)
+            mods={"Signal Producer (L1)":True,"Order Computer (L2)":True,"Execution Gate (L3)":True,
+                  "Multi-Radar V9":ENABLE_MULTI_RADAR,"Acceleration V8":ENABLE_ACCELERATION_ENGINE,
+                  "SmallCap Radar":ENABLE_SMALLCAP_RADAR,"Pre-Halt Engine":ENABLE_PRE_HALT_ENGINE,
+                  "Risk Guard V8":ENABLE_RISK_GUARD,"Market Memory":ENABLE_MARKET_MEMORY,
+                  "Catalyst V3":ENABLE_CATALYST_V3,"Pre-Spike Radar":ENABLE_PRE_SPIKE_RADAR}
+        except Exception:
+            mods={"Signal Producer":True,"Order Computer":True,"Execution Gate":True}
+        for name,active in mods.items():
+            st.markdown(f"{'🟢' if active else '⚫'} {name}")
+with ex3:
+    with st.expander("🕐 Session"):
+        try:
+            from zoneinfo import ZoneInfo
+            _et = datetime.now(ZoneInfo("America/New_York"))
+        except Exception:
+            _et = datetime.now(timezone.utc) - timedelta(hours=4)
+        st.markdown(f"**{_et.strftime('%A %H:%M:%S')} ET**")
+        st.caption(f"Session : **{session}**  •  GV2-EDGE v9.0")
+
+st.divider()
 
 
 # ============================
