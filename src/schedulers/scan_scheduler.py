@@ -23,7 +23,7 @@ Architecture:
 
 import asyncio
 import threading
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, timezone
 from typing import Callable, Dict, List, Optional, Set, Any
 from dataclasses import dataclass
 from enum import Enum
@@ -227,7 +227,7 @@ class ScanScheduler:
         """Start the scheduler"""
         self.running = True
         self.stats = SchedulerStats(
-            start_time=datetime.utcnow(),
+            start_time=datetime.now(timezone.utc),
             mode=self._get_mode(),
             session=self._get_session()
         )
@@ -288,7 +288,7 @@ class ScanScheduler:
         4. Universe rotation (every 10-15 min)
         5. Buzz check (every 10 min)
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         # 1. Global scan
         if (now - self._last_global_scan).total_seconds() >= INTERVALS["global"]:
@@ -466,7 +466,7 @@ class ScanScheduler:
         if not self.stats:
             return {}
 
-        runtime = (datetime.utcnow() - self.stats.start_time).total_seconds()
+        runtime = (datetime.now(timezone.utc) - self.stats.start_time).total_seconds()
 
         return {
             "runtime_seconds": runtime,

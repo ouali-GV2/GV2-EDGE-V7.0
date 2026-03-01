@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 from utils.logger import get_logger
 
@@ -13,7 +13,7 @@ logger = get_logger("REPORT_GENERATOR")
 def generate_report(results_dict, output_path):
 
     report = {
-        "generated_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
+        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
         "summary": {}
     }
 

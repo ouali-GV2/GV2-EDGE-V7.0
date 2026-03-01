@@ -1,5 +1,5 @@
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 from utils.logger import get_logger
 
@@ -36,7 +36,7 @@ def run_full_validation():
     logger.info("Running Monte Carlo...")
     results["monte_carlo"] = run_monte_carlo()
 
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
     report_file = f"{REPORT_DIR}/validation_summary_{timestamp}.json"
 

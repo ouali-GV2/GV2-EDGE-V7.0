@@ -25,7 +25,7 @@ Architecture:
 import asyncio
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Set, Optional, Any
 from dataclasses import dataclass, asdict
 from enum import Enum
@@ -148,11 +148,11 @@ class BatchScheduler:
         Returns:
             BatchReport with results and watchlist
         """
-        run_id = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
         self.report = BatchReport(
             run_id=run_id,
-            started_at=datetime.utcnow()
+            started_at=datetime.now(timezone.utc)
         )
 
         self.running = True
@@ -208,7 +208,7 @@ class BatchScheduler:
 
         finally:
             self.running = False
-            self.report.completed_at = datetime.utcnow()
+            self.report.completed_at = datetime.now(timezone.utc)
             self._generate_summary()
             self._save_report()
 
@@ -225,7 +225,7 @@ class BatchScheduler:
         task = BatchTask(
             name=name,
             status=BatchTaskStatus.RUNNING,
-            started_at=datetime.utcnow()
+            started_at=datetime.now(timezone.utc)
         )
         self.report.tasks.append(task)
 
@@ -244,7 +244,7 @@ class BatchScheduler:
             logger.error(f"Task failed: {name} - {e}")
 
         finally:
-            task.completed_at = datetime.utcnow()
+            task.completed_at = datetime.now(timezone.utc)
 
     # ============================
     # Tasks
@@ -394,7 +394,7 @@ class BatchScheduler:
         watchlist_file = f"{WATCHLIST_DIR}/watchlist_{self.report.run_id}.json"
         with open(watchlist_file, "w") as f:
             json.dump({
-                "date": datetime.utcnow().isoformat(),
+                "date": datetime.now(timezone.utc).isoformat(),
                 "tickers": watchlist,
                 "scores": dict(sorted_tickers[:20])
             }, f, indent=2)
@@ -412,7 +412,7 @@ class BatchScheduler:
         deleted = 0
 
         # Clean old batch reports (keep last 7 days)
-        cutoff = datetime.utcnow() - timedelta(days=7)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=7)
 
         for filename in os.listdir(BATCH_REPORT_DIR):
             if filename.startswith("batch_"):

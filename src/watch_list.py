@@ -18,7 +18,7 @@ J-1: May upgrade to BUY if setup OK
 J-Day PM: BUY_STRONG (execution)
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import pandas as pd
 
 from utils.logger import get_logger
@@ -54,7 +54,7 @@ def generate_watch_list(universe_tickers=None, days_forward=7, min_impact=0.7):
         logger.warning("No events found for watch list")
         return []
     
-    today = datetime.utcnow().date()
+    today = datetime.now(timezone.utc).date()
     cutoff_date = today + timedelta(days=days_forward)
     
     watch_list = []

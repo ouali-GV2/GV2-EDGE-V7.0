@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import pandas as pd
 import os
 
@@ -24,7 +24,7 @@ def run_walk_forward():
 
     results = []
 
-    end_date = datetime.utcnow()
+    end_date = datetime.now(timezone.utc)
     start_date = end_date - timedelta(days=TOTAL_MONTHS * 30)
 
     current = start_date
