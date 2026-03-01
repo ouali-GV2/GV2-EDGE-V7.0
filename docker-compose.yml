@@ -42,6 +42,14 @@ services:
 
     volumes:
       - ./data:/app/data
+      # Source code mounts — git pull + docker restart is enough, no rebuild needed
+      - ./dashboards:/app/dashboards
+      - ./src:/app/src
+      - ./utils:/app/utils
+      - ./alerts:/app/alerts
+      - ./monitoring:/app/monitoring
+      - ./config.py:/app/config.py
+      - ./main.py:/app/main.py
 
     env_file:
       - .env
