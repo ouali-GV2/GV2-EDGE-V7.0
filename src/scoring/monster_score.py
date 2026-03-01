@@ -364,6 +364,37 @@ def compute_monster_score(ticker, use_advanced=True):
     # Clamp 0-1
     final_score = clamp(final_score)
 
+    # ===== TICKER PROFILE BOOSTS (float normalization + squeeze potential) =====
+    float_boost = 0.0
+    squeeze_profile_boost = 0.0
+    try:
+        from config import ENABLE_TICKER_PROFILES
+        if ENABLE_TICKER_PROFILES:
+            from src.market_memory.ticker_profile_store import get_ticker_profile_store
+            profile = get_ticker_profile_store().get(ticker)
+            if profile:
+                # Float boost — small float amplifies volume spike reliability
+                float_shares = profile.get("float_shares") or 0
+                if float_shares > 0:
+                    float_m = float_shares / 1_000_000
+                    if float_m < 2:
+                        float_boost = min(0.05, volume * 0.05)
+                    elif float_m < 10:
+                        float_boost = min(0.03, volume * 0.03)
+                    # float_m >= 50: no boost (large float, volume less meaningful)
+
+                # Squeeze potential boost — high SI + HTB = additional upside
+                si = profile.get("short_interest_pct") or 0
+                if si > 20:
+                    squeeze_profile_boost = min(0.08, (si - 20) / 100)
+                    if (profile.get("borrow_rate") or 0) > 100:
+                        squeeze_profile_boost += 0.05  # HTB bonus
+
+                if float_boost or squeeze_profile_boost:
+                    final_score = clamp(final_score + float_boost + squeeze_profile_boost)
+    except Exception:
+        pass
+
     details = {
         "monster_score": final_score,
         "base_score": round(base_score, 4),
@@ -382,6 +413,8 @@ def compute_monster_score(ticker, use_advanced=True):
             "beat_rate_boost": round(beat_rate_boost, 4),
             "extended_hours_boost": round(extended_hours_boost, 4),
             "acceleration_boost": round(acceleration_boost, 4),  # V8
+            "float_boost": round(float_boost, 4),
+            "squeeze_profile_boost": round(squeeze_profile_boost, 4),
         },
         "raw_scores": {
             "event": round(event_score, 4),

@@ -232,6 +232,37 @@ class SignalProducer:
         # Step 5: Build unified signal
         signal = self._build_unified_signal(input_data, result)
 
+        # Step 5b: Apply Ticker Profile flags (ATM penalty, death spiral, HTB)
+        try:
+            from config import ENABLE_TICKER_PROFILES
+            if ENABLE_TICKER_PROFILES:
+                from src.market_memory.ticker_profile_store import get_ticker_profile_store
+                _profile = get_ticker_profile_store().get(ticker)
+                if _profile:
+                    # ATM active → cap BUY_STRONG → BUY (ongoing dilution suppresses upside)
+                    if _profile.get("atm_active") and signal.signal_type == SignalType.BUY_STRONG:
+                        signal.signal_type = SignalType.BUY
+                        signal.badges.append("⚠️ ATM Active (capped to BUY)")
+
+                    # Death spiral (3+ reverse splits) → flag for Order Computer sizing
+                    rs_count = _profile.get("reverse_split_count") or 0
+                    if rs_count >= 3:
+                        signal.badges.append(f"☠️ Death Spiral ({rs_count}x RS)")
+                        if signal.multi_radar_result is None:
+                            signal.multi_radar_result = {}
+                        signal.multi_radar_result["death_spiral_flag"] = True
+
+                    # HTB (Hard To Borrow) → flag for Telegram alert + sizing
+                    borrow = _profile.get("borrow_rate") or 0
+                    if borrow > 100:
+                        signal.badges.append(f"🔒 HTB {borrow:.0f}%")
+                        if signal.multi_radar_result is None:
+                            signal.multi_radar_result = {}
+                        signal.multi_radar_result["htb"] = True
+                        signal.multi_radar_result["borrow_rate"] = borrow
+        except Exception:
+            pass
+
         # Step 6: Check cooldown BEFORE updating stats (stats track every detection)
         should_alert = self._should_signal(ticker)
 

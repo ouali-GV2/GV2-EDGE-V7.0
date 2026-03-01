@@ -36,6 +36,7 @@ class ScanType(Enum):
     SHORT_INTEREST = "SHORT_INTEREST"     # Short squeeze candidates
     OPTIONS_FLOW = "OPTIONS_FLOW"         # Unusual options activity
     NEWS_SENTIMENT = "NEWS_SENTIMENT"     # Weekend news analysis
+    TICKER_PROFILES = "TICKER_PROFILES"   # Strategic profile update (float, short, dilution)
     CUSTOM = "CUSTOM"                     # User-defined scan
 
 
@@ -239,6 +240,7 @@ class WeekendScanner:
         self._handlers[ScanType.SHORT_INTEREST] = self._scan_short_interest
         self._handlers[ScanType.SECTOR_ROTATION] = self._scan_sector_rotation
         self._handlers[ScanType.NEWS_SENTIMENT] = self._scan_news_sentiment
+        self._handlers[ScanType.TICKER_PROFILES] = self._scan_ticker_profiles
 
     def register_handler(
         self,
@@ -815,6 +817,23 @@ class WeekendScanner:
         return result
 
     # Query methods
+
+    async def _scan_ticker_profiles(self, ticker: str, config: dict) -> Optional["ScanResult"]:
+        """Update strategic profile for one ticker (float, short, dilution, history)."""
+        try:
+            from src.market_memory.ticker_profile_feeder import update_ticker_profile
+            profile = await update_ticker_profile(ticker)
+            if profile:
+                result = ScanResult(ticker=ticker, scan_type=ScanType.TICKER_PROFILES)
+                result.overall_score = profile.get("data_quality", 0.0)
+                result.is_candidate = False
+                result.data["data_quality"] = profile.get("data_quality", 0.0)
+                result.data["float_shares"] = profile.get("float_shares")
+                result.data["short_interest_pct"] = profile.get("short_interest_pct")
+                return result
+        except Exception as e:
+            logger.debug(f"_scan_ticker_profiles failed for {ticker}: {e}")
+        return None
 
     def get_candidates(
         self,

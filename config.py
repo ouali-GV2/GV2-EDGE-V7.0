@@ -434,6 +434,14 @@ RISK_BLOCK_ON_HALT = True             # Block on current halt
 RISK_MIN_POSITION_MULTIPLIER = 0.10   # Minimum 10% of intended size
 
 # ============================
+# TICKER PROFILE STORE (V9)
+# ============================
+
+ENABLE_TICKER_PROFILES = True         # Enable per-ticker strategic profile DB
+TICKER_PROFILES_DB = "data/ticker_profiles.db"
+TICKER_PROFILES_UPDATE_DAYS = 7       # Days between full profile refreshes
+
+# ============================
 # MARKET MEMORY MRP/EP (V7)
 # ============================
 
