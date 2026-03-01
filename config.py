@@ -8,6 +8,11 @@ import os
 
 GROK_API_KEY = os.getenv("GROK_API_KEY", "")
 GROK_API_URL = os.getenv("GROK_API_URL", "https://api.x.ai/v1")
+
+# Groq (groq.com) — LLM inference ultra-rapide (Llama 3.3 70B, ~300 tok/s)
+# Principal NLP — Grok/xAI utilisé en fallback
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GROQ_API_URL = os.getenv("GROQ_API_URL", "https://api.groq.com/openai/v1")
 FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "")
 
 # ========= IBKR CONNECTION =========

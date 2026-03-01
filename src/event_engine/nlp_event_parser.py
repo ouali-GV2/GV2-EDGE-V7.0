@@ -1,7 +1,8 @@
 import json
+import time as _time
 from datetime import datetime
 
-from config import GROK_API_KEY
+from config import GROK_API_KEY, GROQ_API_KEY, GROQ_API_URL
 from utils.api_guard import safe_post, pool_safe_post
 from utils.logger import get_logger
 from utils.data_validator import validate_event
@@ -9,6 +10,11 @@ from utils.data_validator import validate_event
 logger = get_logger("NLP_EVENT_PARSER")
 
 GROK_ENDPOINT = "https://api.x.ai/v1/chat/completions"
+GROQ_ENDPOINT = f"{GROQ_API_URL}/chat/completions"
+GROQ_MODEL    = "llama-3.3-70b-versatile"
+
+# Circuit breaker local (partage aussi celui de nlp_enrichi via import)
+_groq_parser_exhausted_until: float = 0.0
 
 
 SYSTEM_PROMPT = """
@@ -85,39 +91,82 @@ IMPORTANT:
 """
 
 
+def _call_groq_event(text: str) -> dict:
+    """Appel Groq (groq.com) pour extraction d'événements — principal."""
+    global _groq_parser_exhausted_until
+    if not GROQ_API_KEY or _time.time() < _groq_parser_exhausted_until:
+        return {}
+    try:
+        payload = {
+            "model": GROQ_MODEL,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user",   "content": text}
+            ],
+            "temperature": 0.2,
+        }
+        headers = {
+            "Authorization": f"Bearer {GROQ_API_KEY}",
+            "Content-Type": "application/json",
+        }
+        r = pool_safe_post(
+            GROQ_ENDPOINT, json=payload, headers=headers,
+            provider="groq", task_type="NLP_CLASSIFY",
+        )
+        if r.status_code == 429:
+            _groq_parser_exhausted_until = _time.time() + 3600
+            logger.warning("Groq quota atteint (event parser) — circuit breaker 1h")
+            return {}
+        if r.status_code != 200:
+            logger.warning(f"Groq HTTP {r.status_code}: {r.text[:200]}")
+            return {}
+        return r.json()
+    except Exception as e:
+        logger.error(f"Groq event parser error: {e}")
+        return {}
+
+
 def call_grok(text):
+    """Appel Grok (xAI) — fallback si Groq indisponible."""
     # Check shared circuit breaker from nlp_enrichi (4h block after quota exhaustion)
     try:
         from src.nlp_enrichi import _grok_quota_exhausted_until
-        import time as _t
-        if _t.time() < _grok_quota_exhausted_until:
+        if _time.time() < _grok_quota_exhausted_until:
             return {}
     except Exception:
         pass
+
+    if not GROK_API_KEY:
+        return {}
 
     payload = {
         "model": "grok-3-fast",
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": text}
+            {"role": "user",   "content": text}
         ],
-        "temperature": 0.2
+        "temperature": 0.2,
     }
-
     headers = {
         "Authorization": f"Bearer {GROK_API_KEY}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
     }
-
     r = pool_safe_post(
         GROK_ENDPOINT, json=payload, headers=headers,
         provider="grok", task_type="NLP_CLASSIFY",
     )
-    # S4-5 FIX: check HTTP status before parsing to avoid confusing error messages
     if r.status_code != 200:
         logger.warning(f"Grok API returned HTTP {r.status_code}: {r.text[:200]}")
         return {}
     return r.json()
+
+
+def call_nlp(text: str) -> dict:
+    """Essaie Groq (principal) puis Grok (fallback)."""
+    result = _call_groq_event(text)
+    if result:
+        return result
+    return call_grok(text)
 
 
 def _strip_markdown_json(content: str) -> str:
@@ -135,7 +184,7 @@ def _strip_markdown_json(content: str) -> str:
 
 def parse_events_from_text(text):
     try:
-        response = call_grok(text)
+        response = call_nlp(text)
 
         if not response:
             return []

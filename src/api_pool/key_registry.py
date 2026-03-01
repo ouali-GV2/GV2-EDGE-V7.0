@@ -53,6 +53,10 @@ DEFAULT_QUOTAS = {
         "starter": {"per_minute": 60, "per_day": 1000},
         "premium": {"per_minute": 200, "per_day": None},
     },
+    "groq": {
+        "free": {"per_minute": 30, "per_day": 14400},
+        "starter": {"per_minute": 100, "per_day": None},
+    },
     "reddit": {
         "free": {"per_minute": 60, "per_day": 1000},
     },
@@ -454,16 +458,33 @@ def setup_default_keys():
                 priority=prio
             ))
 
-    # Grok/xAI keys
+    # Groq (groq.com) — principal NLP (Llama 3.3 70B, 14 400 req/jour free)
+    groq_envs = [
+        ("GROQ_API_KEY",   "GROQ_MAIN", ["ALL", "NLP_CLASSIFY"], 1),
+        ("GROQ_KEY_B",     "GROQ_B",    ["NLP_CLASSIFY"],         2),
+    ]
+    for env_var, key_id, roles, prio in groq_envs:
+        key_value = os.environ.get(env_var)
+        if key_value:
+            registry.register_key(APIKeyConfig(
+                id=key_id,
+                provider="groq",
+                key=key_value,
+                tier="free",
+                roles=roles,
+                priority=prio
+            ))
+
+    # Grok/xAI keys — fallback NLP
     # GROK_A → CRITICAL/HOT NLP (priority 1)
     # GROK_B → STANDARD NLP (priority 2)
     # GROK_C → BATCH NLP (priority 3)
     # GROK_MAIN → legacy fallback (priority 4)
     grok_envs = [
-        ("XAI_API_KEY",  "GROK_MAIN", ["ALL"],                   4),
-        ("GROK_KEY_A",   "GROK_A",    ["NLP_CLASSIFY", "CRITICAL"], 1),
-        ("GROK_KEY_B",   "GROK_B",    ["NLP_CLASSIFY"],           2),
-        ("GROK_KEY_C",   "GROK_C",    ["BATCH"],                  3),
+        ("XAI_API_KEY",  "GROK_MAIN", ["ALL"],                      4),
+        ("GROK_KEY_A",   "GROK_A",    ["NLP_CLASSIFY", "CRITICAL"],  1),
+        ("GROK_KEY_B",   "GROK_B",    ["NLP_CLASSIFY"],              2),
+        ("GROK_KEY_C",   "GROK_C",    ["BATCH"],                     3),
     ]
 
     for env_var, key_id, roles, prio in grok_envs:

@@ -22,13 +22,15 @@ from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Set
 
-from config import GROK_API_KEY
+from config import GROK_API_KEY, GROQ_API_KEY, GROQ_API_URL
 from utils.api_guard import safe_post, pool_safe_post
 from utils.logger import get_logger
 
 logger = get_logger("NLP_ENRICHI")
 
 GROK_ENDPOINT = "https://api.x.ai/v1/chat/completions"
+GROQ_ENDPOINT = f"{GROQ_API_URL}/chat/completions"
+GROQ_MODEL    = "llama-3.3-70b-versatile"
 
 
 # ============================
@@ -374,11 +376,64 @@ Only output valid JSON. No text outside JSON.
 
 
 # ============================
-# GROK API CALLS
+# NLP API CALLS — Groq (principal) + Grok (fallback)
 # ============================
 
-# Module-level circuit breaker for Grok API (shared across calls)
+# Circuit breakers partagés entre tous les modules NLP
 _grok_quota_exhausted_until: float = 0.0
+_groq_quota_exhausted_until: float = 0.0
+
+
+def _parse_llm_content(result: dict) -> Optional[Dict]:
+    """Extrait et parse le JSON depuis une réponse LLM (Groq ou Grok)."""
+    try:
+        content = result["choices"][0]["message"]["content"].strip()
+        if content.startswith("```json"):
+            content = content[7:]
+        if content.startswith("```"):
+            content = content[3:]
+        if content.endswith("```"):
+            content = content[:-3]
+        return json.loads(content.strip())
+    except Exception:
+        return None
+
+
+def _call_groq(prompt: str, text: str, temperature: float = 0.1) -> Optional[Dict]:
+    """Appel Groq (groq.com) — Llama 3.3 70B, ~300 tok/s, 14 400 req/jour."""
+    import time as _time
+    global _groq_quota_exhausted_until
+    if not GROQ_API_KEY or _time.time() < _groq_quota_exhausted_until:
+        return None
+    try:
+        payload = {
+            "model": GROQ_MODEL,
+            "messages": [
+                {"role": "system", "content": prompt},
+                {"role": "user",   "content": text}
+            ],
+            "temperature": temperature,
+        }
+        headers = {
+            "Authorization": f"Bearer {GROQ_API_KEY}",
+            "Content-Type": "application/json",
+        }
+        response = pool_safe_post(
+            GROQ_ENDPOINT, json=payload, headers=headers,
+            provider="groq", task_type="NLP_CLASSIFY",
+        )
+        if response.status_code == 429:
+            _groq_quota_exhausted_until = _time.time() + 3600
+            logger.warning("Groq quota atteint — circuit breaker 1h, fallback Grok")
+            return None
+        if response.status_code != 200:
+            logger.warning(f"Groq HTTP {response.status_code}: {response.text[:200]}")
+            return None
+        return _parse_llm_content(response.json())
+    except Exception as e:
+        logger.error(f"Groq API error: {e}")
+        return None
+
 
 def _call_grok(prompt: str, text: str, temperature: float = 0.1) -> Optional[Dict]:
     """Make Grok API call with error handling"""
@@ -390,56 +445,47 @@ def _call_grok(prompt: str, text: str, temperature: float = 0.1) -> Optional[Dic
     if _time.time() < _grok_quota_exhausted_until:
         return None
 
+    import time as _time
+    global _grok_quota_exhausted_until
+    if not GROK_API_KEY or _time.time() < _grok_quota_exhausted_until:
+        return None
     try:
         payload = {
             "model": "grok-3-fast",
             "messages": [
                 {"role": "system", "content": prompt},
-                {"role": "user", "content": text}
+                {"role": "user",   "content": text}
             ],
-            "temperature": temperature
+            "temperature": temperature,
         }
-
         headers = {
             "Authorization": f"Bearer {GROK_API_KEY}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
-
         response = pool_safe_post(
             GROK_ENDPOINT, json=payload, headers=headers,
             provider="grok", task_type="NLP_CLASSIFY",
         )
         if response.status_code != 200:
-            logger.warning(f"Grok API HTTP {response.status_code}: {response.text[:200]}")
+            err = response.text[:200]
+            if "credits" in err or "spending limit" in err or response.status_code == 429:
+                _grok_quota_exhausted_until = _time.time() + 14400
+                logger.warning("Grok quota exhausted — circuit breaker 4h")
+            else:
+                logger.warning(f"Grok HTTP {response.status_code}: {err}")
             return None
-        result = response.json()
-
-        content = result["choices"][0]["message"]["content"]
-
-        # Clean up potential markdown formatting
-        content = content.strip()
-        if content.startswith("```json"):
-            content = content[7:]
-        if content.startswith("```"):
-            content = content[3:]
-        if content.endswith("```"):
-            content = content[:-3]
-
-        return json.loads(content.strip())
-
-    except json.JSONDecodeError as e:
-        logger.error(f"JSON parse error: {e}")
-        return None
+        return _parse_llm_content(response.json())
     except Exception as e:
-        import time as _time
-        global _grok_quota_exhausted_until
-        err_str = str(e).lower()
-        if "429" in err_str or "rate limit" in err_str or "credits" in err_str or "spending limit" in err_str:
-            _grok_quota_exhausted_until = _time.time() + 14400
-            logger.warning("Grok quota exhausted - circuit breaker 4h")
-        else:
-            logger.error(f"Grok API error: {e}")
+        logger.error(f"Grok API error: {e}")
         return None
+
+
+def _call_nlp(prompt: str, text: str, temperature: float = 0.1) -> Optional[Dict]:
+    """Essaie Groq (principal) puis Grok (fallback). Retourne None si les deux échouent."""
+    result = _call_groq(prompt, text, temperature)
+    if result is not None:
+        return result
+    return _call_grok(prompt, text, temperature)
 
 
 # S5-1 FIX: Unified Grok prompt — replaces 3 separate calls with 1
@@ -479,42 +525,13 @@ Only output valid JSON. No text outside JSON.
 
 def _call_grok_unified(headline: str, body: str) -> Optional[Dict]:
     """
-    S5-1 FIX: Single Grok call returning sentiment + entities + classification.
-    Reduces API calls from 3 to 1 per news item (-67% Grok usage).
+    S5-1 FIX: Single NLP call (Groq principal, Grok fallback).
+    Retourne sentiment + entities + classification en 1 appel.
     """
-    if not GROK_API_KEY:
+    if not GROQ_API_KEY and not GROK_API_KEY:
         return None
-
     text = f"Headline: {headline}\n\nBody: {body[:800]}"
-
-    try:
-        payload = {
-            "model": "grok-3-fast",
-            "messages": [
-                {"role": "system", "content": UNIFIED_NLP_PROMPT},
-                {"role": "user", "content": text}
-            ],
-            "temperature": 0.1
-        }
-        headers = {
-            "Authorization": f"Bearer {GROK_API_KEY}",
-            "Content-Type": "application/json"
-        }
-        response = safe_post(GROK_ENDPOINT, json=payload, headers=headers)
-        if response.status_code != 200:
-            logger.warning(f"Unified Grok HTTP {response.status_code}")
-            return None
-        result = response.json()
-        content = result["choices"][0]["message"]["content"].strip()
-        # Strip markdown fences
-        if content.startswith("```"):
-            content = content.split("\n", 1)[-1]
-            if content.endswith("```"):
-                content = content[: content.rfind("```")]
-        return json.loads(content.strip())
-    except Exception as e:
-        logger.debug(f"Unified Grok call failed: {e}")
-        return None
+    return _call_nlp(UNIFIED_NLP_PROMPT, text, temperature=0.1)
 
 
 # ============================
@@ -704,7 +721,7 @@ class NLPEnrichi:
         if self.use_grok:
             # Enhanced Grok analysis
             full_text = f"Headline: {headline}\n\nBody: {text}" if headline else text
-            grok_result = _call_grok(SENTIMENT_ANALYSIS_PROMPT, full_text)
+            grok_result = _call_nlp(SENTIMENT_ANALYSIS_PROMPT, full_text)
 
             if grok_result:
                 direction = self._parse_direction(grok_result.get("direction", "neutral"))
@@ -747,7 +764,7 @@ class NLPEnrichi:
         entities = []
 
         if self.use_grok:
-            grok_result = _call_grok(ENTITY_EXTRACTION_PROMPT, text)
+            grok_result = _call_nlp(ENTITY_EXTRACTION_PROMPT, text)
 
             if grok_result:
                 # Merge Grok tickers with regex tickers
@@ -801,7 +818,7 @@ class NLPEnrichi:
 
         if self.use_grok:
             full_text = f"Headline: {headline}\n\nBody: {text[:500]}"  # Truncate for efficiency
-            grok_result = _call_grok(NEWS_CLASSIFICATION_PROMPT, full_text)
+            grok_result = _call_nlp(NEWS_CLASSIFICATION_PROMPT, full_text)
 
             if grok_result:
                 category_str = grok_result.get("category", "other")
