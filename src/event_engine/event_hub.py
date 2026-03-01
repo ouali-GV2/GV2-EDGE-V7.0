@@ -314,13 +314,14 @@ def build_events(tickers=None, force_refresh=False):
         today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         parsed_events = []
         for event in all_events:
-            if "ticker" not in event:
-                continue
-            etype = event.get("type", "news")
+            etype  = event.get("type", "news")
+            # FDA events may have no 'ticker' (conferences) — use name or type as label
+            ticker = event.get("ticker") or event.get("name") or etype
+            date   = event.get("date") or event.get("start_date", today_str)
             parsed_events.append({
-                "ticker":   event["ticker"],
+                "ticker":   ticker,
                 "type":     etype,
-                "date":     event.get("date", today_str),
+                "date":     date,
                 "impact":   _IMPACT.get(etype, 0.6),
                 "category": etype,
                 "metadata": {k: v for k, v in event.items() if k != "text"},
