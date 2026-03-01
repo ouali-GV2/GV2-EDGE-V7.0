@@ -841,31 +841,60 @@ with tab3:
         else:
             st.info("No events cached yet — click 🔄 Refresh to fetch live events.")
     with cside:
-        st.markdown("#### Upcoming Catalysts")
-        upcoming = []
+        st.markdown("#### 📆 Upcoming Catalysts")
+        cal_rows = []
+
+        # SOURCE 1: FDA events (PDUFA, trials, conferences)
         try:
             from src.fda_calendar import get_all_fda_events
-            upcoming = get_all_fda_events()[:8]
+            for e in get_all_fda_events():
+                date = e.get("date") or e.get("start_date", "")
+                ticker = e.get("ticker", "—")
+                etype  = e.get("type", "FDA")
+                name   = e.get("name", "")
+                note   = name if name else etype
+                cal_rows.append({"Date": date, "Ticker": ticker, "Type": etype, "Note": note})
         except Exception:
             pass
-        # Fallback: pull FDA/earnings events from the already-loaded cache
-        if not upcoming and events_cache:
-            upcoming = [
-                e for e in events_cache
-                if e.get("type") not in ("news", "earnings") or e.get("type") == "earnings"
-            ][:8]
-        for item in upcoming:
-            ticker = item.get("ticker", item.get("symbol", "?"))
-            event  = item.get("event_type", item.get("type", "Event"))
-            date   = item.get("date", "")
-            st.markdown(
-                f"""<div class="card"><span class="tick">{ticker}</span>
-                <span style="color:#f59e0b;margin-left:.4rem;font-size:.78rem;">{event}</span>
-                <div style="font-size:.68rem;color:#6b7280;">{date}</div></div>""",
-                unsafe_allow_html=True
+
+        # SOURCE 2: Earnings from events_cache (sorted by date, next 14 days)
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        cutoff = (datetime.now(timezone.utc) + timedelta(days=14)).strftime("%Y-%m-%d")
+        for e in events_cache:
+            if e.get("type") != "earnings":
+                continue
+            date = e.get("date", "")
+            if not (today_str <= date <= cutoff):
+                continue
+            meta = e.get("metadata", {}) or {}
+            eps  = meta.get("eps_estimate")
+            note = f"EPS est. {eps:.2f}" if eps is not None else "earnings"
+            cal_rows.append({
+                "Date":   date,
+                "Ticker": e.get("ticker", "—"),
+                "Type":   "earnings",
+                "Note":   note,
+            })
+
+        if cal_rows:
+            df_cal = pd.DataFrame(cal_rows).sort_values("Date").drop_duplicates(
+                subset=["Date", "Ticker", "Type"]
+            ).reset_index(drop=True)
+            st.dataframe(
+                df_cal,
+                use_container_width=True,
+                hide_index=True,
+                height=420,
+                column_config={
+                    "Date":   st.column_config.TextColumn("Date",   width="small"),
+                    "Ticker": st.column_config.TextColumn("Ticker", width="small"),
+                    "Type":   st.column_config.TextColumn("Type",   width="small"),
+                    "Note":   st.column_config.TextColumn("Note",   width="medium"),
+                },
             )
-        if not upcoming:
-            st.caption("Aucun catalyst FDA trouvé")
+            st.caption(f"{len(df_cal)} upcoming catalysts")
+        else:
+            st.caption("Aucun catalyst à venir")
 
 
 # ─────────────────────────────
