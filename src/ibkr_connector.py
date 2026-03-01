@@ -91,9 +91,10 @@ class IBKRConnector:
         bars = ibkr.get_bars('AAPL', duration='1 D', bar_size='5 mins')
     """
 
-    # Reconnection backoff delays (seconds)
-    RECONNECT_DELAYS = [0, 2, 5, 15, 30]
+    # Reconnection backoff delays (seconds) — assez longs pour laisser ibgateway redémarrer
+    RECONNECT_DELAYS = [5, 15, 30, 60, 120]
     MAX_RECONNECT_ATTEMPTS = 5
+    RETRY_AFTER_FAILURE_SECONDS = 300  # relance auto après échec complet
     HEARTBEAT_INTERVAL = 30  # seconds
 
     def __init__(self, host=None, port=None, client_id=None, readonly=True):
@@ -315,12 +316,26 @@ class IBKRConnector:
                 logger.warning(f"Reconnection attempt {attempt + 1} failed: {e}")
                 continue
 
-        # All attempts exhausted
-        self._set_state(ConnectionState.FAILED)
+        # All attempts exhausted — NE PAS rester en FAILED (état terminal).
+        # Repasser en DISCONNECTED et planifier une nouvelle tentative dans 5 min.
         logger.error(
-            f"IBKR reconnection FAILED after {self.MAX_RECONNECT_ATTEMPTS} attempts. "
-            f"Falling back to Finnhub."
+            f"IBKR reconnection failed after {self.MAX_RECONNECT_ATTEMPTS} attempts. "
+            f"Will retry in {self.RETRY_AFTER_FAILURE_SECONDS}s. Falling back to Finnhub."
         )
+        self._set_state(ConnectionState.DISCONNECTED)
+        threading.Thread(
+            target=self._delayed_retry,
+            daemon=True,
+            name="ibkr-delayed-retry"
+        ).start()
+
+    def _delayed_retry(self):
+        """Attend RETRY_AFTER_FAILURE_SECONDS puis relance _reconnect_loop (boucle infinie)."""
+        logger.info(f"IBKR delayed retry scheduled in {self.RETRY_AFTER_FAILURE_SECONDS}s")
+        time.sleep(self.RETRY_AFTER_FAILURE_SECONDS)
+        if not self.connected:
+            logger.info("IBKR delayed retry starting...")
+            self._reconnect_loop()
 
     def force_reconnect(self):
         """Force a reconnection attempt (callable from dashboard or guardian)"""

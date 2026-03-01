@@ -22,6 +22,8 @@ GROK_PING = "https://api.x.ai/v1/models"
 
 # Track IBKR state for edge-triggered alerts (only alert on change)
 _last_ibkr_state = None
+# Track since when IBKR is disconnected (for auto force_reconnect)
+_ibkr_disconnected_since: float = 0.0
 
 # S4-4 FIX: Per-condition cooldown to prevent Telegram flood.
 # Key = condition label, value = last alert timestamp (epoch seconds).
@@ -33,6 +35,7 @@ _COOLDOWN_SECONDS = {
     "finnhub_down": 300,
     "grok_down": 300,
     "ibkr_latency": 300,
+    "ibkr_reconnect": 300,  # force_reconnect() max 1 fois / 5 min
 }
 _DEFAULT_COOLDOWN = 300  # fallback for unlisted conditions
 
@@ -131,7 +134,7 @@ def check_ibkr():
 # ============================
 
 def analyze_health():
-    global _last_ibkr_state
+    global _last_ibkr_state, _ibkr_disconnected_since
 
     stats = get_system_stats()
 
@@ -182,6 +185,26 @@ def analyze_health():
                 )
 
         _last_ibkr_state = current_state
+
+        # Auto force_reconnect si IBKR déconnecté depuis > 5 min
+        if current_state in ("DISCONNECTED", "FAILED"):
+            now = time.monotonic()
+            if _ibkr_disconnected_since == 0.0:
+                _ibkr_disconnected_since = now
+            elif (now - _ibkr_disconnected_since) > 300 and _cooldown_ok("ibkr_reconnect"):
+                logger.warning(
+                    f"IBKR {current_state} depuis >{(now - _ibkr_disconnected_since)/60:.0f}min "
+                    f"— force_reconnect() automatique"
+                )
+                try:
+                    from src.ibkr_connector import get_ibkr
+                    ibkr_inst = get_ibkr()
+                    if ibkr_inst:
+                        ibkr_inst.force_reconnect()
+                except Exception as _re:
+                    logger.warning(f"force_reconnect failed: {_re}")
+        else:
+            _ibkr_disconnected_since = 0.0
 
         # Warn on high latency (cooldown so we don't flood on sustained high latency)
         if ibkr_status["connected"] and ibkr_status["latency_ms"] > 2000 and _cooldown_ok("ibkr_latency"):
