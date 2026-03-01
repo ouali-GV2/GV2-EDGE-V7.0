@@ -167,16 +167,70 @@ section[data-testid="stSidebar"] { background:var(--bg-secondary); }
 .cyan{color:var(--cyan)}   .muted{color:var(--muted)}
 .score-high{color:var(--green)} .score-med{color:var(--yellow)} .score-low{color:var(--red)}
 
-/* ── Mobile (<640px) ── */
-@media (max-width:640px) {
-    .kpi-value { font-size:1.2rem !important; }
-    .sig-grid  { grid-template-columns:1fr !important; }
-    .gap-grid  { grid-template-columns:repeat(2,1fr) !important; }
-}
+/* ════════════════════════════════════════
+   RESPONSIVE — Desktop first
+   ════════════════════════════════════════ */
+
 /* ── Tablet (641-1024px) ── */
 @media (min-width:641px) and (max-width:1024px) {
-    .sig-grid { grid-template-columns:repeat(2,1fr) !important; }
-    .gap-grid { grid-template-columns:repeat(3,1fr) !important; }
+    .block-container { padding:1rem 1rem 2rem !important; }
+    [data-testid="stHorizontalBlock"] { flex-wrap:wrap !important; }
+    [data-testid="column"] { min-width:calc(50% - .5rem) !important; }
+    .kpi-grid  { grid-template-columns:repeat(3,1fr) !important; }
+    .sig-grid  { grid-template-columns:repeat(2,1fr) !important; }
+    .gap-grid  { grid-template-columns:repeat(3,1fr) !important; }
+}
+
+/* ── Mobile (<640px) ── */
+@media (max-width:640px) {
+    /* Reduce outer padding */
+    .block-container { padding:.3rem .3rem 2rem !important; }
+
+    /* Stack ALL Streamlit columns */
+    [data-testid="stHorizontalBlock"] { flex-wrap:wrap !important; gap:.2rem !important; }
+    [data-testid="column"] { width:100% !important; flex:1 1 100% !important; min-width:0 !important; }
+
+    /* Header */
+    h1 { font-size:1.15rem !important; }
+    h2 { font-size:.95rem !important; }
+    h3 { font-size:.85rem !important; }
+
+    /* KPI: 2 per row */
+    .kpi-grid { grid-template-columns:repeat(2,1fr) !important; gap:.35rem !important; }
+    .kpi { padding:.55rem .3rem !important; }
+    .kpi-value { font-size:1.05rem !important; }
+    .kpi-label { font-size:.58rem !important; }
+    .kpi-sub,.kpi-delta { font-size:.58rem !important; }
+
+    /* Signal/gap grids */
+    .sig-grid { grid-template-columns:1fr !important; }
+    .gap-grid { grid-template-columns:repeat(2,1fr) !important; }
+
+    /* Cards: tighter */
+    .card { padding:.6rem !important; margin:.2rem 0 !important; }
+    .tick { font-size:.85rem !important; }
+
+    /* Tabs: smaller text, horizontal scroll */
+    .stTabs [data-baseweb="tab-list"] { overflow-x:auto !important; flex-wrap:nowrap !important; }
+    .stTabs [data-baseweb="tab"] { font-size:.62rem !important; padding:.2rem .38rem !important; white-space:nowrap !important; }
+
+    /* Log: shorter */
+    .log-container { height:260px !important; font-size:.62rem !important; }
+
+    /* Tables: horizontal scroll */
+    [data-testid="stDataFrame"] > div { overflow-x:auto !important; }
+
+    /* Charts: full width */
+    [data-testid="stPlotlyChart"] { width:100% !important; }
+
+    /* Expanders: tighter */
+    [data-testid="stExpander"] { padding:.3rem !important; }
+
+    /* Pills: smaller */
+    .pill { font-size:.6rem !important; padding:.15rem .35rem !important; }
+
+    /* Hide desktop-only decorative elements */
+    .desktop-only { display:none !important; }
 }
 </style>
 """, unsafe_allow_html=True)
