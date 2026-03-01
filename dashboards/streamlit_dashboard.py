@@ -9,7 +9,6 @@ Responsive : CSS grid + media queries (mobile / tablet / desktop)
 import sys
 import time as _time_mod
 import streamlit as st
-import streamlit.components.v1 as stc
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -1598,32 +1597,19 @@ with tab6:
                 f"<span style='margin-left:auto;font-size:.65rem;color:{dot_col}'>⬤ updated {age_str}</span>"
                 f"</div>",unsafe_allow_html=True)
 
-            # Build HTML log lines
+            # Build HTML log lines — one <div> per line, color by level/event
             row_divs=[]
             for line in lines:
                 esc=line.rstrip("\n\r").replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
                 if not esc.strip(): continue
                 col,bg=_log_color(line)
                 row_divs.append(
-                    f'<div style="color:{col};background:{bg};padding:.06rem .4rem;'
-                    f'border-radius:2px;margin:.3px 0;font-size:.67rem;line-height:1.55;'
-                    f'white-space:pre-wrap;word-break:break-all">{esc}</div>')
+                    f'<div style="color:{col};background:{bg};padding:.04rem .3rem;'
+                    f'border-radius:2px;margin:.2px 0">{esc}</div>')
 
-            # Auto-scroll JS fires only in oldest-first mode (newest already at top)
-            scroll_js="document.getElementById('lb').scrollTop=document.getElementById('lb').scrollHeight;" if not newest_first else ""
-
-            log_html=(
-                "<html><head><style>"
-                "body{margin:0;padding:0;background:#060a10}"
-                "#lb{height:462px;overflow-y:auto;background:#060a10;"
-                "border:1px solid #1e293b;border-radius:10px;padding:.75rem;"
-                "font-family:'JetBrains Mono',Consolas,monospace}"
-                "</style></head><body>"
-                f"<div id='lb'>{''.join(row_divs)}</div>"
-                f"<script>{scroll_js}</script>"
-                "</body></html>"
-            )
-            stc.html(log_html,height=480)
+            st.markdown(
+                f'<div class="log-container">{"".join(row_divs)}</div>',
+                unsafe_allow_html=True)
         else:
             st.info("No log files found in data/logs/")
 
