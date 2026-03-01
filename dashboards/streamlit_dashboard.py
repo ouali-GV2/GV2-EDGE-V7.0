@@ -269,7 +269,7 @@ hr { border-color:var(--border) !important; margin:.6rem 0 !important; }
 # PATHS
 # ============================
 
-DATA_DIR   = Path("data")
+DATA_DIR   = _PROJECT_ROOT / "data"   # absolute — Streamlit changes CWD to script dir
 SIGNALS_DB = DATA_DIR / "signals_history.db"
 LOGS_DIR   = DATA_DIR / "logs"
 AUDIT_DIR  = DATA_DIR / "audit_reports"
