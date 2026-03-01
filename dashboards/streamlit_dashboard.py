@@ -444,9 +444,75 @@ def load_events_cache() -> list:
         return []
 
 
+@st.cache_data(ttl=30)
+def get_groq_status() -> dict:
+    """
+    Calcule l'état de l'API Groq depuis api_monitor.log (dernières 500 lignes).
+    Retourne : configured, state, success_rate, last_ok, last_429, calls_total.
+    """
+    result = {
+        "configured": False, "state": "UNKNOWN",
+        "success_rate": None, "last_ok": None,
+        "last_429": None, "calls_total": 0,
+        "calls_ok": 0, "calls_429": 0,
+    }
+    try:
+        from config import GROQ_API_KEY
+        result["configured"] = bool(GROQ_API_KEY and not GROQ_API_KEY.startswith("YOUR_"))
+    except Exception:
+        pass
+    if not result["configured"]:
+        result["state"] = "NOT_CONFIGURED"
+        return result
+
+    # Parse api_monitor.log pour les entrées groq
+    path = LOGS_DIR / "api_monitor.log"
+    if not path.exists():
+        result["state"] = "NO_DATA"
+        return result
+
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            lines = list(deque(f, maxlen=500))
+    except Exception:
+        result["state"] = "NO_DATA"
+        return result
+
+    groq_lines = [l for l in lines if "| groq |" in l.lower() or "| groq|" in l.lower()]
+    if not groq_lines:
+        result["state"] = "ACTIVE"   # configuré mais pas encore appelé (ex: weekend)
+        return result
+
+    for line in groq_lines:
+        result["calls_total"] += 1
+        if "| OK(" in line:
+            result["calls_ok"] += 1
+            # extrait timestamp (premier champ)
+            ts = line.split("|")[0].strip()
+            result["last_ok"] = ts
+        elif "RATE_LIMIT" in line or "429" in line or "TOKEN_BUCKET" in line:
+            result["calls_429"] += 1
+            ts = line.split("|")[0].strip()
+            result["last_429"] = ts
+
+    if result["calls_total"] > 0:
+        result["success_rate"] = result["calls_ok"] / result["calls_total"] * 100
+
+    # Déduire l'état : si les 5 dernières lignes groq sont toutes 429 → QUOTA_EXHAUSTED
+    recent = groq_lines[-5:]
+    if recent and all("RATE_LIMIT" in l or "429" in l or "TOKEN_BUCKET" in l for l in recent):
+        result["state"] = "QUOTA_EXHAUSTED"
+    elif result["calls_ok"] > 0:
+        result["state"] = "ACTIVE"
+    else:
+        result["state"] = "DEGRADED"
+
+    return result
+
+
 @st.cache_data(ttl=120)
 def get_system_status() -> dict:
-    status = {"ibkr":False,"grok":False,"finnhub":False,"telegram":False}
+    status = {"ibkr":False,"groq":False,"grok":False,"finnhub":False,"telegram":False}
     try:
         from src.ibkr_connector import get_ibkr
         ibkr = get_ibkr()
@@ -454,7 +520,9 @@ def get_system_status() -> dict:
     except Exception:
         pass
     try:
-        from config import GROK_API_KEY, FINNHUB_API_KEY
+        from config import GROQ_API_KEY, GROK_API_KEY, FINNHUB_API_KEY
+        groq_st = get_groq_status()
+        status["groq"]    = groq_st["configured"] and groq_st["state"] != "QUOTA_EXHAUSTED"
         status["grok"]    = bool(GROK_API_KEY and not GROK_API_KEY.startswith("YOUR_"))
         status["finnhub"] = bool(FINNHUB_API_KEY and not FINNHUB_API_KEY.startswith("YOUR_"))
     except Exception:
@@ -750,9 +818,19 @@ if ibkr_st.get("latency"):
     _ibkr_label += f" {ibkr_st['latency']}"
 
 chips = f'<span class="status-chip {_ibkr_cls}">{_ibkr_icon} {_ibkr_label}</span>'
+_groq_st = get_groq_status()
 for k, ok in sys_status.items():
     if k == "ibkr": continue
-    chips += f'<span class="status-chip {"chip-ok" if ok else "chip-err"}">{"🟢" if ok else "🔴"} {k.upper()}</span>'
+    if k == "groq":
+        _g_state = _groq_st["state"]
+        _g_cls  = "chip-ok" if _g_state == "ACTIVE" else ("chip-warn" if _g_state in ("UNKNOWN","NO_DATA","DEGRADED") else "chip-err")
+        _g_icon = "🟢" if _g_state == "ACTIVE" else ("🟡" if _g_state in ("UNKNOWN","NO_DATA","DEGRADED") else "🔴")
+        _g_rate = f" {_groq_st['success_rate']:.0f}%" if _groq_st["success_rate"] is not None else ""
+        chips += f'<span class="status-chip {_g_cls}">{_g_icon} GROQ{_g_rate}</span>'
+    elif k == "grok":
+        chips += f'<span class="status-chip {"chip-ok" if ok else "chip-warn"}">{"🟢" if ok else "🟡"} GROK<span style="font-size:.65rem;opacity:.7;"> fallback</span></span>'
+    else:
+        chips += f'<span class="status-chip {"chip-ok" if ok else "chip-err"}">{"🟢" if ok else "🔴"} {k.upper()}</span>'
 
 try:
     from config import (ENABLE_MULTI_RADAR, ENABLE_ACCELERATION_ENGINE, ENABLE_SMALLCAP_RADAR,
@@ -1323,6 +1401,67 @@ with tab5:
     st.markdown("### 🌐 API Monitor — Live")
     st.caption("Source : `data/logs/api_monitor.log`")
 
+    # ── NLP Providers ─────────────────────────────────────────────────────────
+    st.markdown("#### 🤖 NLP Providers")
+    _gs = get_groq_status()
+    _ss = get_system_status()
+
+    nlp1, nlp2 = st.columns(2)
+
+    # Groq card (principal)
+    with nlp1:
+        _g_state = _gs["state"]
+        _g_color = "#10b981" if _g_state == "ACTIVE" else ("#f59e0b" if _g_state in ("UNKNOWN","NO_DATA","DEGRADED") else "#ef4444")
+        _g_icon  = "🟢" if _g_state == "ACTIVE" else ("🟡" if _g_state in ("UNKNOWN","NO_DATA","DEGRADED") else "🔴")
+        _g_rate  = f"{_gs['success_rate']:.1f}%" if _gs["success_rate"] is not None else "—"
+        _g_calls = f"{_gs['calls_ok']}/{_gs['calls_total']}" if _gs["calls_total"] > 0 else "pas encore appelé"
+        _g_last  = _gs.get("last_ok") or "—"
+        _g_429   = f"{_gs['calls_429']} 429" if _gs["calls_429"] else "aucun"
+        st.markdown(f"""
+<div style="background:#0f1929;border:1px solid {_g_color}40;border-left:3px solid {_g_color};
+            border-radius:8px;padding:1rem 1.2rem;margin-bottom:.5rem;">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem;">
+    <span style="font-weight:700;font-size:1rem;">GROQ <span style="font-size:.7rem;background:{_g_color}22;color:{_g_color};
+          border-radius:4px;padding:.1rem .4rem;margin-left:.4rem;">PRINCIPAL</span></span>
+    <span style="color:{_g_color};font-weight:700;">{_g_icon} {_g_state}</span>
+  </div>
+  <div style="font-size:.78rem;color:#94a3b8;line-height:1.8;">
+    Modèle &nbsp;: <span style="color:#e2e8f0;">Llama 3.3 70B</span><br>
+    Succès &nbsp;: <span style="color:#e2e8f0;">{_g_rate} ({_g_calls})</span><br>
+    Dernier OK : <span style="color:#e2e8f0;">{_g_last[-19:] if len(_g_last)>19 else _g_last}</span><br>
+    Rate limits : <span style="color:{'#ef4444' if _gs['calls_429']>0 else '#10b981'};">{_g_429}</span>
+  </div>
+</div>""", unsafe_allow_html=True)
+
+    # Grok card (fallback)
+    with nlp2:
+        _grok_ok  = _ss.get("grok", False)
+        _grok_lines = [l for l in load_api_monitor(500) if "| grok |" in l.lower()]
+        _grok_total = len(_grok_lines)
+        _grok_ok_n  = sum(1 for l in _grok_lines if "| OK(" in l)
+        _grok_429   = sum(1 for l in _grok_lines if "RATE_LIMIT" in l or "429" in l)
+        _grok_rate  = f"{_grok_ok_n/_grok_total*100:.1f}%" if _grok_total > 0 else "—"
+        _grok_state = "QUOTA_EXHAUSTED" if (_grok_total > 0 and _grok_429 > _grok_ok_n) else ("ACTIVE" if _grok_ok_n > 0 else ("CONFIGURED" if _grok_ok else "NOT_CONFIGURED"))
+        _gk_color   = "#10b981" if _grok_state == "ACTIVE" else ("#f59e0b" if _grok_state == "CONFIGURED" else "#ef4444")
+        _gk_icon    = "🟢" if _grok_state == "ACTIVE" else ("🟡" if _grok_state == "CONFIGURED" else "🔴")
+        _gk_last    = next((l.split("|")[0].strip() for l in reversed(_grok_lines) if "| OK(" in l), "—")
+        st.markdown(f"""
+<div style="background:#0f1929;border:1px solid {_gk_color}40;border-left:3px solid {_gk_color};
+            border-radius:8px;padding:1rem 1.2rem;margin-bottom:.5rem;">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem;">
+    <span style="font-weight:700;font-size:1rem;">GROK xAI <span style="font-size:.7rem;background:#94a3b822;color:#94a3b8;
+          border-radius:4px;padding:.1rem .4rem;margin-left:.4rem;">FALLBACK</span></span>
+    <span style="color:{_gk_color};font-weight:700;">{_gk_icon} {_grok_state}</span>
+  </div>
+  <div style="font-size:.78rem;color:#94a3b8;line-height:1.8;">
+    Modèle &nbsp;: <span style="color:#e2e8f0;">grok-3-fast</span><br>
+    Succès &nbsp;: <span style="color:#e2e8f0;">{_grok_rate} ({_grok_ok_n}/{_grok_total})</span><br>
+    Dernier OK : <span style="color:#e2e8f0;">{_gk_last[-19:] if len(_gk_last)>19 else _gk_last}</span><br>
+    Rate limits : <span style="color:{'#ef4444' if _grok_429>0 else '#10b981'};">{_grok_429} 429</span>
+  </div>
+</div>""", unsafe_allow_html=True)
+
+    st.markdown("---")
     api_lines=load_api_monitor(200)
     if not api_lines:
         st.info("api_monitor.log vide — attend les premières requêtes")
