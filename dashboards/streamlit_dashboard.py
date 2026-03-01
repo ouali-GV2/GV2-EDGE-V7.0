@@ -349,8 +349,25 @@ def load_latest_audit() -> dict | None:
     if not files:
         return None
     try:
-        with open(sorted(files)[-1]) as f:
-            return json.load(f)
+        # Sort by modification time so we always get the most recent file
+        latest = max(files, key=lambda f: f.stat().st_mtime)
+        with open(latest) as f:
+            data = json.load(f)
+        # Flatten nested structure (daily_audit has summary/hit_analysis/etc.)
+        flat = dict(data)
+        for key in ("summary", "hit_analysis", "miss_analysis", "fp_analysis", "metrics", "details"):
+            sub = data.get(key, {})
+            if isinstance(sub, dict):
+                flat.update(sub)
+        # Normalise key names to what the dashboard expects
+        flat.setdefault("true_positives",  flat.get("hit_count", 0))
+        flat.setdefault("false_positives", flat.get("fp_count",  flat.get("false_positive_count", 0)))
+        flat.setdefault("missed_movers",   flat.get("miss_count", 0))
+        flat.setdefault("hit_rate",        flat.get("hit_rate", 0))
+        flat.setdefault("avg_lead_time_hours", flat.get("avg_lead_time_hours", 0))
+        flat.setdefault("early_catch_rate",    flat.get("early_catch_rate", 0))
+        flat.setdefault("total_signals",       flat.get("total_signals", 0))
+        return flat
     except Exception:
         return None
 
@@ -362,8 +379,9 @@ def load_hot_queue() -> list:
         return []
     try:
         conn = sqlite3.connect(str(db), check_same_thread=False)
+        # Table is "hot_tickers" (not "queue"); no score column — use 0.0
         rows = conn.execute(
-            "SELECT ticker,priority,score,added_at FROM queue ORDER BY score DESC LIMIT 20"
+            "SELECT ticker, priority, 0.0, added_at FROM hot_tickers ORDER BY added_at DESC LIMIT 20"
         ).fetchall()
         conn.close()
         return [{"ticker":r[0],"priority":r[1],"score":r[2],"added_at":r[3]} for r in rows]
