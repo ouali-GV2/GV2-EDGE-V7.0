@@ -22,6 +22,8 @@ from config import OLLAMA_BASE_URL, OLLAMA_MODEL, ENABLE_OLLAMA_BATCH
 from utils.logger import get_logger
 
 logger = get_logger("NLP_LOCAL")
+# Dedicated structured log for Ollama anomaly detection (data/logs/ollama.log)
+ollama_log = get_logger("ollama")
 
 _OLLAMA_CHAT_URL = f"{OLLAMA_BASE_URL}/v1/chat/completions"
 _OLLAMA_HEALTH_URL = f"{OLLAMA_BASE_URL}/api/tags"
@@ -29,18 +31,38 @@ _OLLAMA_HEALTH_URL = f"{OLLAMA_BASE_URL}/api/tags"
 # Circuit breaker : évite de tenter Ollama si down
 _ollama_down_until: float = 0.0
 _OLLAMA_COOLDOWN = 120  # 2 min avant de réessayer après échec
+_SLOW_INFERENCE_MS = 30_000  # warning si inférence > 30s
+
+
+def _log_event(event: str, **kwargs) -> None:
+    """Écrit une ligne structurée dans ollama.log pour analyse d'anomalies."""
+    parts = [f"EVENT={event}"]
+    parts += [f"{k}={v}" for k, v in kwargs.items()]
+    ollama_log.info(" ".join(parts))
 
 
 def is_ollama_available() -> bool:
     """Ping rapide pour savoir si Ollama tourne."""
     global _ollama_down_until
-    if time.time() < _ollama_down_until:
+    was_in_cooldown = time.time() < _ollama_down_until
+    if was_in_cooldown:
         return False
     try:
         r = requests.get(_OLLAMA_HEALTH_URL, timeout=3)
-        return r.status_code == 200
+        if r.status_code == 200:
+            if _ollama_down_until > 0:
+                # Ollama vient de revenir après une panne
+                _log_event("CIRCUIT_BREAKER_OFF", model=OLLAMA_MODEL)
+                _ollama_down_until = 0.0
+            return True
+        _ollama_down_until = time.time() + _OLLAMA_COOLDOWN
+        _log_event("CIRCUIT_BREAKER_ON", reason="health_check_fail",
+                   status=r.status_code, cooldown_s=_OLLAMA_COOLDOWN, model=OLLAMA_MODEL)
+        return False
     except Exception:
         _ollama_down_until = time.time() + _OLLAMA_COOLDOWN
+        _log_event("CIRCUIT_BREAKER_ON", reason="health_check_error",
+                   cooldown_s=_OLLAMA_COOLDOWN, model=OLLAMA_MODEL)
         return False
 
 
@@ -72,6 +94,7 @@ def call_ollama(prompt: str, text: str, temperature: float = 0.1) -> Optional[Di
     if not is_ollama_available():
         return None
 
+    input_len = len(prompt) + len(text)
     try:
         payload = {
             "model": OLLAMA_MODEL,
@@ -84,25 +107,56 @@ def call_ollama(prompt: str, text: str, temperature: float = 0.1) -> Optional[Di
         }
         t0 = time.time()
         r = requests.post(_OLLAMA_CHAT_URL, json=payload, timeout=60)
-        elapsed = int((time.time() - t0) * 1000)
+        elapsed_ms = int((time.time() - t0) * 1000)
 
         if r.status_code != 200:
-            logger.warning(f"Ollama HTTP {r.status_code} ({elapsed}ms)")
+            logger.warning(f"Ollama HTTP {r.status_code} ({elapsed_ms}ms)")
             _ollama_down_until = time.time() + _OLLAMA_COOLDOWN
+            _log_event("CALL_FAIL", status=r.status_code, latency_ms=elapsed_ms,
+                       model=OLLAMA_MODEL, input_len=input_len)
+            _log_event("CIRCUIT_BREAKER_ON", reason=f"http_{r.status_code}",
+                       cooldown_s=_OLLAMA_COOLDOWN, model=OLLAMA_MODEL)
             return None
 
-        result = _parse_ollama_response(r.json())
+        raw = r.json()
+        result = _parse_ollama_response(raw)
+
+        # Extract token usage from OpenAI-compatible response
+        usage = raw.get("usage", {})
+        completion_tokens = usage.get("completion_tokens", 0)
+        prompt_tokens = usage.get("prompt_tokens", 0)
+        tok_per_s = round(completion_tokens / (elapsed_ms / 1000), 1) if elapsed_ms > 0 else 0
+
         if result is not None:
-            logger.debug(f"Ollama OK ({elapsed}ms, model={OLLAMA_MODEL})")
+            logger.debug(f"Ollama OK ({elapsed_ms}ms, {completion_tokens} tokens, model={OLLAMA_MODEL})")
+            _log_event("CALL_OK", latency_ms=elapsed_ms, prompt_tokens=prompt_tokens,
+                       completion_tokens=completion_tokens, tok_per_s=tok_per_s,
+                       model=OLLAMA_MODEL, input_len=input_len)
+            if elapsed_ms > _SLOW_INFERENCE_MS:
+                _log_event("SLOW_INFERENCE", latency_ms=elapsed_ms, model=OLLAMA_MODEL,
+                           threshold_ms=_SLOW_INFERENCE_MS)
+                logger.warning(f"Ollama slow inference: {elapsed_ms}ms (>{_SLOW_INFERENCE_MS}ms)")
+        else:
+            _log_event("PARSE_FAIL", latency_ms=elapsed_ms, model=OLLAMA_MODEL,
+                       completion_tokens=completion_tokens)
         return result
 
     except requests.exceptions.Timeout:
+        elapsed_ms = int((time.time() - t0) * 1000)
         logger.warning("Ollama timeout (>60s) — circuit breaker 2min")
         _ollama_down_until = time.time() + _OLLAMA_COOLDOWN
+        _log_event("TIMEOUT", latency_ms=elapsed_ms, model=OLLAMA_MODEL, input_len=input_len)
+        _log_event("CIRCUIT_BREAKER_ON", reason="timeout",
+                   cooldown_s=_OLLAMA_COOLDOWN, model=OLLAMA_MODEL)
         return None
     except Exception as e:
+        elapsed_ms = int((time.time() - t0) * 1000)
         logger.warning(f"Ollama error: {e}")
         _ollama_down_until = time.time() + _OLLAMA_COOLDOWN
+        _log_event("CALL_FAIL", reason=type(e).__name__, latency_ms=elapsed_ms,
+                   model=OLLAMA_MODEL, input_len=input_len)
+        _log_event("CIRCUIT_BREAKER_ON", reason=type(e).__name__,
+                   cooldown_s=_OLLAMA_COOLDOWN, model=OLLAMA_MODEL)
         return None
 
 
@@ -122,6 +176,7 @@ def call_batch_nlp(prompt: str, text: str, temperature: float = 0.1) -> Optional
         result = _call_groq(prompt, text, temperature)
         if result is not None:
             logger.debug("Batch NLP: fallback vers Groq API")
+            _log_event("FALLBACK_GROQ", reason="ollama_unavailable_or_failed", model=OLLAMA_MODEL)
             return result
     except Exception as e:
         logger.debug(f"Groq fallback error: {e}")

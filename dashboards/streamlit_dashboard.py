@@ -1520,7 +1520,8 @@ with tab6:
     log_files=sorted(f.name for f in LOGS_DIR.glob("*.log")) if LOGS_DIR.exists() else []
     lc1,lc2=st.columns([1,3])
     PRIORITY_LOGS=["main.log","signal_producer.log","multi_radar.log",
-                   "execution_gate.log","ibkr_connector.log","api_monitor.log","telegram_alerts.log"]
+                   "execution_gate.log","ibkr_connector.log","api_monitor.log",
+                   "ollama.log","telegram_alerts.log"]
     with lc1:
         ordered=[l for l in PRIORITY_LOGS if l in log_files]+[l for l in log_files if l not in PRIORITY_LOGS]
         selected_log=st.selectbox("Log file",ordered,index=0) if log_files else None

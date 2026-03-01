@@ -11,6 +11,7 @@ from config import (
     FINNHUB_API_KEY,
     GROK_API_KEY,
     USE_IBKR_DATA,
+    ENABLE_OLLAMA_BATCH,
 )
 
 logger = get_logger("SYSTEM_GUARDIAN")
@@ -34,6 +35,7 @@ _COOLDOWN_SECONDS = {
     "disk_full": 1800,     # max 1 alert / 30 min for disk
     "finnhub_down": 300,
     "grok_down": 300,
+    "ollama_down": 600,    # max 1 alert / 10 min si Ollama indisponible
     "ibkr_latency": 300,
     "ibkr_reconnect": 300,  # force_reconnect() max 1 fois / 5 min
 }
@@ -88,6 +90,27 @@ def check_grok():
         return r.status_code == 200
     except:
         return False
+
+
+def check_ollama() -> dict:
+    """
+    Vérifie l'état d'Ollama (santé + modèle chargé).
+    Retourne un dict avec available, model_ready, circuit_breaker_active.
+    """
+    if not ENABLE_OLLAMA_BATCH:
+        return {"available": False, "model_ready": False, "circuit_breaker_active": False, "disabled": True}
+    try:
+        from src.nlp_local import get_ollama_status
+        status = get_ollama_status()
+        return {
+            "available": status.get("available", False),
+            "model_ready": status.get("model_ready", False),
+            "circuit_breaker_active": status.get("circuit_breaker_until") is not None,
+            "disabled": False,
+        }
+    except Exception as e:
+        logger.debug(f"check_ollama error: {e}")
+        return {"available": False, "model_ready": False, "circuit_breaker_active": False, "disabled": False}
 
 
 # ============================
@@ -153,6 +176,12 @@ def analyze_health():
 
     if not check_grok() and _cooldown_ok("grok_down"):
         send_system_alert("Grok API unreachable")
+
+    # Ollama health — alerte si batch NLP activé mais Ollama down
+    ollama_status = check_ollama()
+    if not ollama_status.get("disabled") and not ollama_status.get("available"):
+        if _cooldown_ok("ollama_down"):
+            send_system_alert("Ollama (batch NLP) unreachable — fallback Groq actif", level="warning")
 
     # IBKR health check with edge-triggered alerts
     ibkr_status = check_ibkr()
@@ -237,8 +266,14 @@ def analyze_health():
         except Exception:
             pass
 
+    ollama_str = ""
+    if not ollama_status.get("disabled"):
+        _av = "UP" if ollama_status.get("available") else "DOWN"
+        _mr = " model_ready" if ollama_status.get("model_ready") else ""
+        ollama_str = f" | Ollama {_av}{_mr}"
+
     logger.info(
-        f"Health OK | CPU {stats['cpu']}% RAM {stats['ram']}% DISK {stats['disk']}%{ibkr_msg}"
+        f"Health OK | CPU {stats['cpu']}% RAM {stats['ram']}% DISK {stats['disk']}%{ibkr_msg}{ollama_str}"
     )
 
 
