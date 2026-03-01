@@ -156,13 +156,20 @@ def fetch_earnings_events(days_forward=7):
 
 def fetch_breaking_news(category="general"):
     """
-    General market news — returns structured event dicts (not raw text strings).
-    Uses Finnhub 'related' field as ticker when available.
+    General market news — returns structured event dicts.
+    Extracts ticker from headline text (TickerExtractor) when 'related' is empty.
     """
     params = {
         "category": category,
         "token": FINNHUB_API_KEY
     }
+
+    # Lazy-load ticker extractor (no universe needed — extract_all validates syntax only)
+    try:
+        from src.processors.ticker_extractor import TickerExtractor
+        _extractor = TickerExtractor()
+    except Exception:
+        _extractor = None
 
     try:
         r = pool_safe_get(FINNHUB_GENERAL_NEWS, params=params, timeout=10, provider="finnhub", task_type="GENERAL_NEWS")
@@ -175,12 +182,19 @@ def fetch_breaking_news(category="general"):
             summary  = item.get("summary", "")
             if not headline:
                 continue
+
+            # Prefer 'related' field; fallback to NLP extraction from headline
             ticker = (item.get("related", "") or "").strip().upper()
-            ts     = item.get("datetime", 0)
+            if not ticker and _extractor:
+                extracted = _extractor.extract_all(f"{headline}. {summary}")
+                ticker = extracted[0] if extracted else ""
+
+            ts = item.get("datetime", 0)
             try:
                 date = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d") if ts else today
             except Exception:
                 date = today
+
             events.append({
                 "text":     f"{headline}. {summary}",
                 "headline": headline,
