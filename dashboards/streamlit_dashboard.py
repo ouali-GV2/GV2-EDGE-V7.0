@@ -967,6 +967,9 @@ st.markdown("<div style='margin:.2rem 0'></div>", unsafe_allow_html=True)
 # TABS
 # ============================
 
+# Diagnostic banner — remove once stable
+st.caption(f"✅ Script running — {datetime.now(timezone.utc).strftime('%H:%M:%S')} UTC")
+
 tab1,tab2,tab3,tab4,tab5,tab6,tab7,tab8,tab9 = st.tabs([
     "📡 Live Signals", "📊 Analytics", "📅 Events",
     "🛰️ Multi-Radar V9", "🌐 API Monitor", "📋 Live Logs", "🔍 Audit",
@@ -979,88 +982,93 @@ tab1,tab2,tab3,tab4,tab5,tab6,tab7,tab8,tab9 = st.tabs([
 # ─────────────────────────────
 
 with tab1:
-    # Hot queue
-    hot = load_hot_queue()
-    if hot:
-        st.markdown("#### 🔥 Hot Ticker Queue")
-        hcols = st.columns(min(len(hot),8))
-        for i,h in enumerate(hot[:8]):
-            pri=h["priority"]
-            c={"HOT":"#10b981","WARM":"#f59e0b"}.get(pri,"#6b7280")
-            hcols[i].markdown(f"""<div class="card" style="text-align:center;padding:.45rem;border-left:3px solid {c};">
-                <div class="tick" style="font-size:.85rem;">{h['ticker']}</div>
-                <div style="font-size:.62rem;color:{c};">{pri}</div>
-                <div style="font-size:.62rem;color:#6b7280;">{h.get('score',0):.2f}</div>
-            </div>""",unsafe_allow_html=True)
-        st.markdown("---")
+    try:
+        # Hot queue
+        hot = load_hot_queue()
+        if hot:
+            st.markdown("#### 🔥 Hot Ticker Queue")
+            hcols = st.columns(min(len(hot),8))
+            for i,h in enumerate(hot[:8]):
+                pri=h["priority"]
+                c={"HOT":"#10b981","WARM":"#f59e0b"}.get(pri,"#6b7280")
+                hcols[i].markdown(f"""<div class="card" style="text-align:center;padding:.45rem;border-left:3px solid {c};">
+                    <div class="tick" style="font-size:.85rem;">{h['ticker']}</div>
+                    <div style="font-size:.62rem;color:{c};">{pri}</div>
+                    <div style="font-size:.62rem;color:#6b7280;">{h.get('score',0):.2f}</div>
+                </div>""",unsafe_allow_html=True)
+            st.markdown("---")
 
-    # Extended Hours Movers
-    if gaps_data:
-        sorted_gaps=sorted(gaps_data,key=lambda x:abs(x.get("gap_pct",x.get("gap",0))),reverse=True)
-        gap_cards="".join([f"""<div class="gap-card {'gap-up' if (g.get('gap_pct',g.get('gap',0)))>0 else 'gap-down'}">
-            <div class="tick" style="font-size:.82rem;">{g.get('ticker','?')}</div>
-            <div style="font-family:'JetBrains Mono',monospace;font-size:1rem;font-weight:700;color:{'#10b981' if (g.get('gap_pct',g.get('gap',0)))>0 else '#ef4444'};">
-                {'+'if g.get('gap_pct',g.get('gap',0))>0 else ''}{g.get('gap_pct',g.get('gap',0)):.1f}%
-            </div>
-            <div style="font-size:.62rem;color:#6b7280;">${g.get('price',g.get('last',0)):.2f}</div>
-        </div>""" for g in sorted_gaps[:8]])
-        st.markdown("#### 📈 Extended Hours Movers")
-        st.markdown(f'<div class="gap-grid">{gap_cards}</div>',unsafe_allow_html=True)
-        st.markdown("---")
+        # Extended Hours Movers
+        if gaps_data:
+            sorted_gaps=sorted(gaps_data,key=lambda x:abs(x.get("gap_pct",x.get("gap",0))),reverse=True)
+            gap_cards="".join([f"""<div class="gap-card {'gap-up' if (g.get('gap_pct',g.get('gap',0)))>0 else 'gap-down'}">
+                <div class="tick" style="font-size:.82rem;">{g.get('ticker','?')}</div>
+                <div style="font-family:'JetBrains Mono',monospace;font-size:1rem;font-weight:700;color:{'#10b981' if (g.get('gap_pct',g.get('gap',0)))>0 else '#ef4444'};">
+                    {'+'if g.get('gap_pct',g.get('gap',0))>0 else ''}{g.get('gap_pct',g.get('gap',0)):.1f}%
+                </div>
+                <div style="font-size:.62rem;color:#6b7280;">${g.get('price',g.get('last',0)):.2f}</div>
+            </div>""" for g in sorted_gaps[:8]])
+            st.markdown("#### 📈 Extended Hours Movers")
+            st.markdown(f'<div class="gap-grid">{gap_cards}</div>',unsafe_allow_html=True)
+            st.markdown("---")
 
-    # Signal cards
-    st.markdown("### 🔥 Active Signals")
-    if signals_df.empty:
-        st.info("No signals in range — engine scanning…")
-    else:
-        fdf=signals_df.copy()
-        if signal_filter: fdf=fdf[fdf["signal_type"].isin(signal_filter)]
-        fdf=fdf[fdf["monster_score"]>=min_score]
-        if fdf.empty:
-            st.warning("No signals match filters.")
+        # Signal cards
+        st.markdown("### 🔥 Active Signals")
+        if signals_df.empty:
+            st.info("No signals in range — engine scanning…")
         else:
-            type_order=["BUY_STRONG","BUY","WATCH","EARLY_SIGNAL"]
-            fdf["_o"]=fdf["signal_type"].map({t:i for i,t in enumerate(type_order)}).fillna(99)
-            fdf=fdf.sort_values(["_o","monster_score"],ascending=[True,False])
-            cls_map={"BUY_STRONG":"card-buy-strong","BUY":"card-buy","WATCH":"card-watch","EARLY_SIGNAL":"card-early"}
+            fdf=signals_df.copy()
+            if signal_filter: fdf=fdf[fdf["signal_type"].isin(signal_filter)]
+            fdf=fdf[fdf["monster_score"]>=min_score]
+            if fdf.empty:
+                st.warning("No signals match filters.")
+            else:
+                type_order=["BUY_STRONG","BUY","WATCH","EARLY_SIGNAL"]
+                fdf["_o"]=fdf["signal_type"].map({t:i for i,t in enumerate(type_order)}).fillna(99)
+                fdf=fdf.sort_values(["_o","monster_score"],ascending=[True,False])
+                cls_map={"BUY_STRONG":"card-buy-strong","BUY":"card-buy","WATCH":"card-watch","EARLY_SIGNAL":"card-early"}
 
-            def sig_card(row, cls):
-                ticker=row.get("ticker","?"); stype=row.get("signal_type","WATCH")
-                score=float(row.get("monster_score",0) or 0); ts=fmt_time(str(row.get("timestamp","")))
-                entry=row.get("entry_price"); stop=row.get("stop_loss"); shares=row.get("shares")
-                ev=float(row.get("event_impact",0) or 0); vol=float(row.get("volume_spike",0) or 0)
-                alert="card-alert" if stype=="BUY_STRONG" else ""
-                return f"""<div class="card {cls} {alert}">
-                    <div style="display:flex;justify-content:space-between;align-items:center;">
-                        <span class="tick">{ticker}</span>{signal_badge(stype)}
-                    </div>
-                    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:.25rem;margin-top:.55rem;text-align:center;">
-                        <div><div style="color:#9ca3af;font-size:.62rem;">SCORE</div>
-                            <div style="font-family:'JetBrains Mono',monospace;font-weight:700;font-size:.9rem;color:{score_color(score)};">{score:.2f}</div></div>
-                        <div><div style="color:#9ca3af;font-size:.62rem;">ENTRY</div>
-                            <div style="font-family:'JetBrains Mono',monospace;font-size:.88rem;color:#f9fafb;">${f'{entry:.2f}' if entry else '—'}</div></div>
-                        <div><div style="color:#9ca3af;font-size:.62rem;">STOP</div>
-                            <div style="font-family:'JetBrains Mono',monospace;font-size:.88rem;color:#ef4444;">${f'{stop:.2f}' if stop else '—'}</div></div>
-                        <div><div style="color:#9ca3af;font-size:.62rem;">QTY</div>
-                            <div style="font-family:'JetBrains Mono',monospace;font-size:.88rem;color:#f9fafb;">{int(shares) if shares else '—'}</div></div>
-                    </div>
-                    <div style="display:flex;gap:.35rem;margin-top:.4rem;font-size:.65rem;color:#9ca3af;">
-                        <span>Ev:{ev:.2f}</span><span>Vol:{vol:.2f}</span>
-                        <span style="margin-left:auto;">{ts}</span>
-                    </div>
-                </div>"""
+                def sig_card(row, cls):
+                    ticker=row.get("ticker","?"); stype=row.get("signal_type","WATCH")
+                    score=float(row.get("monster_score",0) or 0); ts=fmt_time(str(row.get("timestamp","")))
+                    entry=row.get("entry_price"); stop=row.get("stop_loss"); shares=row.get("shares")
+                    ev=float(row.get("event_impact",0) or 0); vol=float(row.get("volume_spike",0) or 0)
+                    alert="card-alert" if stype=="BUY_STRONG" else ""
+                    return f"""<div class="card {cls} {alert}">
+                        <div style="display:flex;justify-content:space-between;align-items:center;">
+                            <span class="tick">{ticker}</span>{signal_badge(stype)}
+                        </div>
+                        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:.25rem;margin-top:.55rem;text-align:center;">
+                            <div><div style="color:#9ca3af;font-size:.62rem;">SCORE</div>
+                                <div style="font-family:'JetBrains Mono',monospace;font-weight:700;font-size:.9rem;color:{score_color(score)};">{score:.2f}</div></div>
+                            <div><div style="color:#9ca3af;font-size:.62rem;">ENTRY</div>
+                                <div style="font-family:'JetBrains Mono',monospace;font-size:.88rem;color:#f9fafb;">${f'{entry:.2f}' if entry else '—'}</div></div>
+                            <div><div style="color:#9ca3af;font-size:.62rem;">STOP</div>
+                                <div style="font-family:'JetBrains Mono',monospace;font-size:.88rem;color:#ef4444;">${f'{stop:.2f}' if stop else '—'}</div></div>
+                            <div><div style="color:#9ca3af;font-size:.62rem;">QTY</div>
+                                <div style="font-family:'JetBrains Mono',monospace;font-size:.88rem;color:#f9fafb;">{int(shares) if shares else '—'}</div></div>
+                        </div>
+                        <div style="display:flex;gap:.35rem;margin-top:.4rem;font-size:.65rem;color:#9ca3af;">
+                            <span>Ev:{ev:.2f}</span><span>Vol:{vol:.2f}</span>
+                            <span style="margin-left:auto;">{ts}</span>
+                        </div>
+                    </div>"""
 
-            cards_html="".join([sig_card(row,cls_map.get(row["signal_type"],"card-watch")) for _,row in fdf.head(24).iterrows()])
-            st.markdown(f'<div class="sig-grid">{cards_html}</div>',unsafe_allow_html=True)
-            st.markdown("<br>",unsafe_allow_html=True)
+                cards_html="".join([sig_card(row,cls_map.get(row["signal_type"],"card-watch")) for _,row in fdf.head(24).iterrows()])
+                st.markdown(f'<div class="sig-grid">{cards_html}</div>',unsafe_allow_html=True)
+                st.markdown("<br>",unsafe_allow_html=True)
 
-            if "timestamp" in fdf.columns:
-                st.markdown("#### 📈 Timeline")
-                st.plotly_chart(chart_timeline(fdf),use_container_width=True)
+                if "timestamp" in fdf.columns:
+                    st.markdown("#### 📈 Timeline")
+                    st.plotly_chart(chart_timeline(fdf),use_container_width=True)
 
-            with st.expander("📋 Full Table"):
-                cols=[c for c in ["timestamp","ticker","signal_type","monster_score","entry_price","stop_loss","shares","event_impact","volume_spike"] if c in fdf.columns]
-                st.dataframe(fdf[cols].head(100),use_container_width=True,hide_index=True)
+                with st.expander("📋 Full Table"):
+                    cols=[c for c in ["timestamp","ticker","signal_type","monster_score","entry_price","stop_loss","shares","event_impact","volume_spike"] if c in fdf.columns]
+                    st.dataframe(fdf[cols].head(100),use_container_width=True,hide_index=True)
+    except Exception as _e1:
+        import traceback as _tb1
+        st.error(f"Tab 1 error: {_e1}")
+        st.code(_tb1.format_exc())
 
 
 # ─────────────────────────────
@@ -1068,42 +1076,47 @@ with tab1:
 # ─────────────────────────────
 
 with tab2:
-    st.markdown("### 📊 Analytics")
-    if signals_df.empty:
-        st.info("No signals to analyse.")
-    else:
-        c1,c2=st.columns(2)
-        with c1:
-            st.markdown("#### Monster Score V4 Radar")
-            buy_rows=signals_df[signals_df["signal_type"].isin(["BUY_STRONG","BUY"])]
-            if not buy_rows.empty:
-                st.plotly_chart(chart_score_radar(load_monster_components(buy_rows.iloc[0])),use_container_width=True)
-            else:
-                st.info("No BUY signal yet")
-        with c2:
-            st.markdown("#### Score Distribution")
-            if "monster_score" in signals_df.columns:
-                st.plotly_chart(chart_score_dist(signals_df),use_container_width=True)
-
-        st.markdown("#### Signal Type Breakdown")
-        st.plotly_chart(chart_type_bar(signals_df),use_container_width=True)
-        st.divider()
-
-        st.markdown("#### 🚀 V8/V9 Boosts")
-        boost_df=pd.DataFrame({"Boost":["Beat Rate","Extended Hours","Acceleration V8","Insider","Short Squeeze"],
-            "Max":[0.15,0.22,0.15,0.15,0.20],
-            "Source":["Historical earnings","Gap+AH/PM vol","ACCUMULATING/LAUNCHING","SEC Form 4","Short float"]})
-        st.dataframe(boost_df,use_container_width=True,hide_index=True)
-        st.divider()
-
-        st.markdown("#### 📋 Proposed Orders")
-        order_df=signals_df[signals_df["signal_type"].isin(["BUY_STRONG","BUY"])].copy()
-        if not order_df.empty:
-            cols=[c for c in ["timestamp","ticker","signal_type","monster_score","entry_price","stop_loss","shares"] if c in order_df.columns]
-            st.dataframe(order_df[cols].head(20),use_container_width=True,hide_index=True)
-            st.caption("⚠️ IBKR READ ONLY — ordres non exécutés")
+    try:
+        st.markdown("### 📊 Analytics")
+        if signals_df.empty:
+            st.info("No signals to analyse.")
         else:
-            st.info("No BUY signals yet")
+            c1,c2=st.columns(2)
+            with c1:
+                st.markdown("#### Monster Score V4 Radar")
+                buy_rows=signals_df[signals_df["signal_type"].isin(["BUY_STRONG","BUY"])]
+                if not buy_rows.empty:
+                    st.plotly_chart(chart_score_radar(load_monster_components(buy_rows.iloc[0])),use_container_width=True)
+                else:
+                    st.info("No BUY signal yet")
+            with c2:
+                st.markdown("#### Score Distribution")
+                if "monster_score" in signals_df.columns:
+                    st.plotly_chart(chart_score_dist(signals_df),use_container_width=True)
+
+            st.markdown("#### Signal Type Breakdown")
+            st.plotly_chart(chart_type_bar(signals_df),use_container_width=True)
+            st.divider()
+
+            st.markdown("#### 🚀 V8/V9 Boosts")
+            boost_df=pd.DataFrame({"Boost":["Beat Rate","Extended Hours","Acceleration V8","Insider","Short Squeeze"],
+                "Max":[0.15,0.22,0.15,0.15,0.20],
+                "Source":["Historical earnings","Gap+AH/PM vol","ACCUMULATING/LAUNCHING","SEC Form 4","Short float"]})
+            st.dataframe(boost_df,use_container_width=True,hide_index=True)
+            st.divider()
+
+            st.markdown("#### 📋 Proposed Orders")
+            order_df=signals_df[signals_df["signal_type"].isin(["BUY_STRONG","BUY"])].copy()
+            if not order_df.empty:
+                cols=[c for c in ["timestamp","ticker","signal_type","monster_score","entry_price","stop_loss","shares"] if c in order_df.columns]
+                st.dataframe(order_df[cols].head(20),use_container_width=True,hide_index=True)
+                st.caption("⚠️ IBKR READ ONLY — ordres non exécutés")
+            else:
+                st.info("No BUY signals yet")
+    except Exception as _e2:
+        import traceback as _tb2
+        st.error(f"Tab 2 error: {_e2}")
+        st.code(_tb2.format_exc())
 
 
 # ─────────────────────────────
@@ -1111,127 +1124,132 @@ with tab2:
 # ─────────────────────────────
 
 with tab3:
-    st.markdown("### 📅 Catalysts & Events")
-    # Controls row
-    rc1, rc2 = st.columns([5, 1])
-    with rc2:
-        if st.button("🔄 Refresh", key="refresh_events", help="Re-fetch events from all sources"):
+    try:
+        st.markdown("### 📅 Catalysts & Events")
+        # Controls row
+        rc1, rc2 = st.columns([5, 1])
+        with rc2:
+            if st.button("🔄 Refresh", key="refresh_events", help="Re-fetch events from all sources"):
+                try:
+                    from src.event_engine.event_hub import refresh_events
+                    from src.universe_loader import get_tickers
+                    with st.spinner("Fetching events…"):
+                        tickers = (get_tickers(limit=150) or [])
+                        refresh_events(tickers=tickers or None)
+                    st.cache_data.clear()
+                    st.success(f"Events refreshed! ({len(tickers)} tickers)")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Refresh failed: {e}")
+
+        events_cache = load_events_cache()
+
+        # If file cache is empty, try live fetch (earnings + breaking news only, no tickers needed)
+        if not events_cache:
             try:
-                from src.event_engine.event_hub import refresh_events
-                from src.universe_loader import get_tickers
-                with st.spinner("Fetching events…"):
-                    tickers = (get_tickers(limit=150) or [])
-                    refresh_events(tickers=tickers or None)
-                st.cache_data.clear()
-                st.success(f"Events refreshed! ({len(tickers)} tickers)")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Refresh failed: {e}")
+                from src.event_engine.event_hub import build_events
+                events_cache = build_events(tickers=None) or []
+            except Exception:
+                events_cache = []
 
-    events_cache = load_events_cache()
+        ce, cside = st.columns([2, 1])
+        with ce:
+            if events_cache:
+                df_ev = pd.DataFrame(events_cache)
+                # Extract headline from metadata for news events
+                if "metadata" in df_ev.columns:
+                    df_ev["headline"] = df_ev["metadata"].apply(
+                        lambda m: m.get("headline", "") if isinstance(m, dict) else ""
+                    )
+                if "type" in df_ev.columns:
+                    st.markdown("#### Event Types")
+                    st.plotly_chart(chart_events_pie(df_ev["type"].value_counts()), use_container_width=True)
+                    # Filter by type
+                    all_types = sorted(df_ev["type"].dropna().unique().tolist())
+                    sel_types = st.multiselect("Filter by type", all_types, default=all_types, key="ev_type_filter")
+                    df_ev = df_ev[df_ev["type"].isin(sel_types)] if sel_types else df_ev
+                show = [c for c in ["ticker", "type", "boosted_impact", "date", "headline", "is_bearish"] if c in df_ev.columns]
+                if show:
+                    st.markdown(f"#### Recent Events ({len(df_ev)} total)")
+                    st.dataframe(df_ev[show].head(100), use_container_width=True, hide_index=True)
+                else:
+                    st.dataframe(df_ev.head(50), use_container_width=True, hide_index=True)
+            else:
+                st.info("No events cached yet — click 🔄 Refresh to fetch live events.")
+        with cside:
+            st.markdown("#### 📆 Upcoming Catalysts")
+            cal_rows = []
 
-    # If file cache is empty, try live fetch (earnings + breaking news only, no tickers needed)
-    if not events_cache:
-        try:
-            from src.event_engine.event_hub import build_events
-            events_cache = build_events(tickers=None) or []
-        except Exception:
-            events_cache = []
+            # SOURCE 1: FDA events (PDUFA, trials, conferences)
+            try:
+                from src.fda_calendar import get_all_fda_events
+                for e in get_all_fda_events():
+                    date = e.get("date") or e.get("start_date", "")
+                    ticker = e.get("ticker", "—")
+                    etype  = e.get("type", "FDA")
+                    name   = e.get("name", "")
+                    note   = name if name else etype
+                    cal_rows.append({"Date": date, "Ticker": ticker, "Type": etype, "Note": note})
+            except Exception:
+                pass
 
-    ce, cside = st.columns([2, 1])
-    with ce:
-        if events_cache:
-            df_ev = pd.DataFrame(events_cache)
-            # Extract headline from metadata for news events
-            if "metadata" in df_ev.columns:
-                df_ev["headline"] = df_ev["metadata"].apply(
-                    lambda m: m.get("headline", "") if isinstance(m, dict) else ""
+            # SOURCE 2: ALL events from events_cache
+            today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            cutoff_earnings = (datetime.now(timezone.utc) + timedelta(days=14)).strftime("%Y-%m-%d")
+            cutoff_news     = (datetime.now(timezone.utc) + timedelta(days=3)).strftime("%Y-%m-%d")
+            for e in events_cache:
+                etype  = e.get("type", "")
+                date   = e.get("date", "")
+                ticker = e.get("ticker", "—") or "—"
+                meta   = e.get("metadata", {}) or {}
+
+                if etype == "earnings":
+                    if not (today_str <= date <= cutoff_earnings):
+                        continue
+                    eps  = meta.get("eps_estimate")
+                    note = f"EPS est. {eps:.2f}" if eps is not None else "earnings"
+
+                elif etype == "news":
+                    if not (today_str <= date <= cutoff_news):
+                        continue
+                    note = meta.get("headline", meta.get("text", "news"))[:60]
+
+                else:
+                    # FDA_APPROVAL, M_AND_A, CONTRACT, etc. — no date filter
+                    if date and date < today_str:
+                        continue
+                    note = meta.get("headline", meta.get("text", etype))[:60]
+
+                cal_rows.append({
+                    "Date":   date,
+                    "Ticker": ticker,
+                    "Type":   etype,
+                    "Note":   note,
+                })
+
+            if cal_rows:
+                df_cal = pd.DataFrame(cal_rows).sort_values("Date").drop_duplicates(
+                    subset=["Date", "Ticker", "Type"]
+                ).reset_index(drop=True)
+                st.dataframe(
+                    df_cal,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=420,
+                    column_config={
+                        "Date":   st.column_config.TextColumn("Date",   width="small"),
+                        "Ticker": st.column_config.TextColumn("Ticker", width="small"),
+                        "Type":   st.column_config.TextColumn("Type",   width="small"),
+                        "Note":   st.column_config.TextColumn("Note",   width="medium"),
+                    },
                 )
-            if "type" in df_ev.columns:
-                st.markdown("#### Event Types")
-                st.plotly_chart(chart_events_pie(df_ev["type"].value_counts()), use_container_width=True)
-                # Filter by type
-                all_types = sorted(df_ev["type"].dropna().unique().tolist())
-                sel_types = st.multiselect("Filter by type", all_types, default=all_types, key="ev_type_filter")
-                df_ev = df_ev[df_ev["type"].isin(sel_types)] if sel_types else df_ev
-            show = [c for c in ["ticker", "type", "boosted_impact", "date", "headline", "is_bearish"] if c in df_ev.columns]
-            if show:
-                st.markdown(f"#### Recent Events ({len(df_ev)} total)")
-                st.dataframe(df_ev[show].head(100), use_container_width=True, hide_index=True)
+                st.caption(f"{len(df_cal)} upcoming catalysts")
             else:
-                st.dataframe(df_ev.head(50), use_container_width=True, hide_index=True)
-        else:
-            st.info("No events cached yet — click 🔄 Refresh to fetch live events.")
-    with cside:
-        st.markdown("#### 📆 Upcoming Catalysts")
-        cal_rows = []
-
-        # SOURCE 1: FDA events (PDUFA, trials, conferences)
-        try:
-            from src.fda_calendar import get_all_fda_events
-            for e in get_all_fda_events():
-                date = e.get("date") or e.get("start_date", "")
-                ticker = e.get("ticker", "—")
-                etype  = e.get("type", "FDA")
-                name   = e.get("name", "")
-                note   = name if name else etype
-                cal_rows.append({"Date": date, "Ticker": ticker, "Type": etype, "Note": note})
-        except Exception:
-            pass
-
-        # SOURCE 2: ALL events from events_cache
-        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        cutoff_earnings = (datetime.now(timezone.utc) + timedelta(days=14)).strftime("%Y-%m-%d")
-        cutoff_news     = (datetime.now(timezone.utc) + timedelta(days=3)).strftime("%Y-%m-%d")
-        for e in events_cache:
-            etype  = e.get("type", "")
-            date   = e.get("date", "")
-            ticker = e.get("ticker", "—") or "—"
-            meta   = e.get("metadata", {}) or {}
-
-            if etype == "earnings":
-                if not (today_str <= date <= cutoff_earnings):
-                    continue
-                eps  = meta.get("eps_estimate")
-                note = f"EPS est. {eps:.2f}" if eps is not None else "earnings"
-
-            elif etype == "news":
-                if not (today_str <= date <= cutoff_news):
-                    continue
-                note = meta.get("headline", meta.get("text", "news"))[:60]
-
-            else:
-                # FDA_APPROVAL, M_AND_A, CONTRACT, etc. — no date filter
-                if date and date < today_str:
-                    continue
-                note = meta.get("headline", meta.get("text", etype))[:60]
-
-            cal_rows.append({
-                "Date":   date,
-                "Ticker": ticker,
-                "Type":   etype,
-                "Note":   note,
-            })
-
-        if cal_rows:
-            df_cal = pd.DataFrame(cal_rows).sort_values("Date").drop_duplicates(
-                subset=["Date", "Ticker", "Type"]
-            ).reset_index(drop=True)
-            st.dataframe(
-                df_cal,
-                use_container_width=True,
-                hide_index=True,
-                height=420,
-                column_config={
-                    "Date":   st.column_config.TextColumn("Date",   width="small"),
-                    "Ticker": st.column_config.TextColumn("Ticker", width="small"),
-                    "Type":   st.column_config.TextColumn("Type",   width="small"),
-                    "Note":   st.column_config.TextColumn("Note",   width="medium"),
-                },
-            )
-            st.caption(f"{len(df_cal)} upcoming catalysts")
-        else:
-            st.caption("Aucun catalyst à venir")
+                st.caption("Aucun catalyst à venir")
+    except Exception as _e3:
+        import traceback as _tb3
+        st.error(f"Tab 3 error: {_e3}")
+        st.code(_tb3.format_exc())
 
 
 # ─────────────────────────────
@@ -1253,145 +1271,150 @@ _SESSION_WEIGHTS = {
 }
 
 with tab4:
-    st.markdown("### 🛰️ Multi-Radar Engine V9")
+    try:
+        st.markdown("### 🛰️ Multi-Radar Engine V9")
 
-    # ── Row 1: Session weights + confluence matrix ──────────────────
-    rw1, rw2 = st.columns([3, 2])
-    with rw1:
-        st.markdown("#### ⚖️ Session Weights")
-        _sess_idx = {"AFTER_HOURS":0,"PRE_MARKET":1,"RTH_OPEN":2,"RTH_MIDDAY":3,"RTH_CLOSE":4,"CLOSED":5}
-        cur_idx = _sess_idx.get(session, -1)
-        df_sw = pd.DataFrame(_SESSION_WEIGHTS)
-        # Mark active session with indicator — no Styler (avoids Streamlit compatibility issues)
-        df_sw.insert(0, "▶", ["◀" if i == cur_idx else "" for i in range(len(df_sw))])
-        st.dataframe(df_sw, use_container_width=True, hide_index=True)
-        st.caption(f"Session active : **{session}**")
-    with rw2:
-        st.markdown("#### 🔀 Confluence Matrix")
-        st.markdown(
-            "| Flow \\ Catalyst | HIGH ≥0.6 | MED 0.3-0.6 | LOW <0.3 |\n"
-            "|:---|:---:|:---:|:---:|\n"
-            "| **HIGH** | 🟢 BUY_STRONG | 🔵 BUY | 👁 WATCH |\n"
-            "| **MED**  | 🔵 BUY | 👁 WATCH | 🟡 EARLY |\n"
-            "| **LOW**  | 👁 WATCH | 🟡 EARLY | ⬜ NO_SIGNAL |"
-        )
-        st.caption("Smart Money HIGH → +1 niveau · Sentiment HIGH + 2+ radars → +1 · 4/4 UNANIMOUS → +0.15")
+        # ── Row 1: Session weights + confluence matrix ──────────────────
+        rw1, rw2 = st.columns([3, 2])
+        with rw1:
+            st.markdown("#### ⚖️ Session Weights")
+            _sess_idx = {"AFTER_HOURS":0,"PRE_MARKET":1,"RTH_OPEN":2,"RTH_MIDDAY":3,"RTH_CLOSE":4,"CLOSED":5}
+            cur_idx = _sess_idx.get(session, -1)
+            df_sw = pd.DataFrame(_SESSION_WEIGHTS)
+            # Mark active session with indicator — no Styler (avoids Streamlit compatibility issues)
+            df_sw.insert(0, "▶", ["◀" if i == cur_idx else "" for i in range(len(df_sw))])
+            st.dataframe(df_sw, use_container_width=True, hide_index=True)
+            st.caption(f"Session active : **{session}**")
+        with rw2:
+            st.markdown("#### 🔀 Confluence Matrix")
+            st.markdown(
+                "| Flow \\ Catalyst | HIGH ≥0.6 | MED 0.3-0.6 | LOW <0.3 |\n"
+                "|:---|:---:|:---:|:---:|\n"
+                "| **HIGH** | 🟢 BUY_STRONG | 🔵 BUY | 👁 WATCH |\n"
+                "| **MED**  | 🔵 BUY | 👁 WATCH | 🟡 EARLY |\n"
+                "| **LOW**  | 👁 WATCH | 🟡 EARLY | ⬜ NO_SIGNAL |"
+            )
+            st.caption("Smart Money HIGH → +1 niveau · Sentiment HIGH + 2+ radars → +1 · 4/4 UNANIMOUS → +0.15")
 
-    st.divider()
+        st.divider()
 
-    # ── Row 2: General Watch List ────────────────────────────────────
-    st.markdown("#### 📋 Watch List Générale")
-    wl_days = st.slider("Horizon (jours)", 1, 30, 14, key="wl_days")
-    wl_imp  = st.slider("Impact minimum", 0.1, 1.0, 0.5, step=0.05, key="wl_imp")
-    # load_watch_list() fetches all data once (cached 5min) — filter client-side
-    _all_wl = load_watch_list()
-    watch_list_data = [
-        w for w in _all_wl
-        if w.get("impact", 0) >= wl_imp
-        and w.get("days_to_event", 99) <= wl_days
-    ]
+        # ── Row 2: General Watch List ────────────────────────────────────
+        st.markdown("#### 📋 Watch List Générale")
+        wl_days = st.slider("Horizon (jours)", 1, 30, 14, key="wl_days")
+        wl_imp  = st.slider("Impact minimum", 0.1, 1.0, 0.5, step=0.05, key="wl_imp")
+        # load_watch_list() fetches all data once (cached 5min) — filter client-side
+        _all_wl = load_watch_list()
+        watch_list_data = [
+            w for w in _all_wl
+            if w.get("impact", 0) >= wl_imp
+            and w.get("days_to_event", 99) <= wl_days
+        ]
 
-    if watch_list_data:
-        wl_rows = []
-        for w in watch_list_data:
-            wl_rows.append({
-                "Ticker":  w.get("ticker", "—"),
-                "Type":    w.get("event_type", "—"),
-                "Date":    w.get("event_date", "—"),
-                "J-":      w.get("days_to_event", "—"),
-                "Impact":  round(w.get("impact", 0), 2),
-                "Prob %":  round(w.get("probability", 0) * 100, 1),
-                "Raison":  w.get("reason", "—"),
-            })
-        st.dataframe(
-            pd.DataFrame(wl_rows),
-            use_container_width=True, hide_index=True, height=300,
-            column_config={
-                "Impact":  st.column_config.ProgressColumn("Impact",  min_value=0, max_value=1, format="%.2f"),
-                "Prob %":  st.column_config.ProgressColumn("Prob %",  min_value=0, max_value=100, format="%.1f%%"),
-                "J-":      st.column_config.NumberColumn("J-", help="Jours avant l'événement"),
-            },
-        )
-        st.caption(f"{len(watch_list_data)} tickers en surveillance")
-    else:
-        st.info("Aucun ticker en watch list (pas d'events à venir avec cet impact)")
-
-    st.divider()
-
-    # ── Row 3: Radar States + Per-Radar Watch Lists ──────────────────
-    st.markdown("#### 🎯 État des Radars & Watch List par Radar")
-    radar_signals = load_radar_signals(200)
-
-    # Build per-radar maps from DB signals
-    per_radar: dict = {k: [] for k in _RADAR_LABELS}
-    radar_last_score: dict = {k: None for k in _RADAR_LABELS}
-    radar_last_state: dict = {k: "—" for k in _RADAR_LABELS}
-
-    for sig in radar_signals:
-        r = sig.get("radar")
-        if not isinstance(r, dict) or "radars" not in r:
-            continue
-        for rname in _RADAR_LABELS:
-            rdata = r["radars"].get(rname, {})
-            if not rdata:
-                continue
-            score = rdata.get("score", 0)
-            state = rdata.get("state", "—")
-            # Update last known score/state (first hit = most recent)
-            if radar_last_score[rname] is None:
-                radar_last_score[rname] = score
-                radar_last_state[rname] = state
-            # Collect active tickers for per-radar watch list
-            if rdata.get("is_active") or score >= 0.3:
-                per_radar[rname].append({
-                    "Ticker":      sig["ticker"],
-                    "Signal":      sig["signal_type"],
-                    "Score radar": round(score, 2),
-                    "State":       state,
-                    "Score total": round(sig["score"], 2),
-                    "Time":        sig["timestamp"][:16] if sig["timestamp"] else "—",
+        if watch_list_data:
+            wl_rows = []
+            for w in watch_list_data:
+                wl_rows.append({
+                    "Ticker":  w.get("ticker", "—"),
+                    "Type":    w.get("event_type", "—"),
+                    "Date":    w.get("event_date", "—"),
+                    "J-":      w.get("days_to_event", "—"),
+                    "Impact":  round(w.get("impact", 0), 2),
+                    "Prob %":  round(w.get("probability", 0) * 100, 1),
+                    "Raison":  w.get("reason", "—"),
                 })
+            st.dataframe(
+                pd.DataFrame(wl_rows),
+                use_container_width=True, hide_index=True, height=300,
+                column_config={
+                    "Impact":  st.column_config.ProgressColumn("Impact",  min_value=0, max_value=1, format="%.2f"),
+                    "Prob %":  st.column_config.ProgressColumn("Prob %",  min_value=0, max_value=100, format="%.1f%%"),
+                    "J-":      st.column_config.NumberColumn("J-", help="Jours avant l'événement"),
+                },
+            )
+            st.caption(f"{len(watch_list_data)} tickers en surveillance")
+        else:
+            st.info("Aucun ticker en watch list (pas d'events à venir avec cet impact)")
 
-    # 4 radar state cards
-    rc1, rc2, rc3, rc4 = st.columns(4)
-    for col, (rname, (label, color)) in zip([rc1, rc2, rc3, rc4], _RADAR_LABELS.items()):
-        sc = radar_last_score[rname]
-        st_txt = radar_last_state[rname]
-        n_tickers = len(per_radar[rname])
-        sc_str = f"{sc:.2f}" if sc is not None else "N/A"
-        bar = int((sc or 0) * 10)
-        col.markdown(
-            f"""<div class="card" style="border-left:3px solid {color};padding:.6rem .8rem;">
-            <div style="color:{color};font-weight:700;font-size:.9rem;">{label}</div>
-            <div style="font-size:1.4rem;font-weight:700;margin:.2rem 0;">{sc_str}</div>
-            <div style="font-size:.75rem;color:#9ca3af;">{'█'*bar}{'░'*(10-bar)}</div>
-            <div style="font-size:.72rem;color:#6b7280;margin-top:.3rem;">
-                State: <b style="color:#f9fafb">{st_txt}</b><br>
-                Tickers actifs: <b style="color:#f9fafb">{n_tickers}</b>
-            </div></div>""",
-            unsafe_allow_html=True,
-        )
+        st.divider()
 
-    st.markdown("<br>", unsafe_allow_html=True)
+        # ── Row 3: Radar States + Per-Radar Watch Lists ──────────────────
+        st.markdown("#### 🎯 État des Radars & Watch List par Radar")
+        radar_signals = load_radar_signals(200)
 
-    # Per-radar watch list tabs
-    rtab_flow, rtab_cat, rtab_sm, rtab_sent = st.tabs([
-        "🌊 Flow", "⚡ Catalyst", "💰 Smart Money", "💬 Sentiment"
-    ])
-    for rtab, rname in zip([rtab_flow, rtab_cat, rtab_sm, rtab_sent], _RADAR_LABELS):
-        with rtab:
-            rows = per_radar[rname]
-            if rows:
-                st.dataframe(
-                    pd.DataFrame(rows).drop_duplicates("Ticker").sort_values("Score radar", ascending=False),
-                    use_container_width=True, hide_index=True, height=280,
-                    column_config={
-                        "Score radar":  st.column_config.ProgressColumn("Score radar",  min_value=0, max_value=1, format="%.2f"),
-                        "Score total":  st.column_config.ProgressColumn("Score total",  min_value=0, max_value=1, format="%.2f"),
-                    },
-                )
-            else:
-                st.info("Aucun signal récent pour ce radar (DB vide ou marché fermé)")
+        # Build per-radar maps from DB signals
+        per_radar: dict = {k: [] for k in _RADAR_LABELS}
+        radar_last_score: dict = {k: None for k in _RADAR_LABELS}
+        radar_last_state: dict = {k: "—" for k in _RADAR_LABELS}
+
+        for sig in radar_signals:
+            r = sig.get("radar")
+            if not isinstance(r, dict) or "radars" not in r:
+                continue
+            for rname in _RADAR_LABELS:
+                rdata = r["radars"].get(rname, {})
+                if not rdata:
+                    continue
+                score = rdata.get("score", 0)
+                state = rdata.get("state", "—")
+                # Update last known score/state (first hit = most recent)
+                if radar_last_score[rname] is None:
+                    radar_last_score[rname] = score
+                    radar_last_state[rname] = state
+                # Collect active tickers for per-radar watch list
+                if rdata.get("is_active") or score >= 0.3:
+                    per_radar[rname].append({
+                        "Ticker":      sig["ticker"],
+                        "Signal":      sig["signal_type"],
+                        "Score radar": round(score, 2),
+                        "State":       state,
+                        "Score total": round(sig["score"], 2),
+                        "Time":        sig["timestamp"][:16] if sig["timestamp"] else "—",
+                    })
+
+        # 4 radar state cards
+        rc1, rc2, rc3, rc4 = st.columns(4)
+        for col, (rname, (label, color)) in zip([rc1, rc2, rc3, rc4], _RADAR_LABELS.items()):
+            sc = radar_last_score[rname]
+            st_txt = radar_last_state[rname]
+            n_tickers = len(per_radar[rname])
+            sc_str = f"{sc:.2f}" if sc is not None else "N/A"
+            bar = int((sc or 0) * 10)
+            col.markdown(
+                f"""<div class="card" style="border-left:3px solid {color};padding:.6rem .8rem;">
+                <div style="color:{color};font-weight:700;font-size:.9rem;">{label}</div>
+                <div style="font-size:1.4rem;font-weight:700;margin:.2rem 0;">{sc_str}</div>
+                <div style="font-size:.75rem;color:#9ca3af;">{'█'*bar}{'░'*(10-bar)}</div>
+                <div style="font-size:.72rem;color:#6b7280;margin-top:.3rem;">
+                    State: <b style="color:#f9fafb">{st_txt}</b><br>
+                    Tickers actifs: <b style="color:#f9fafb">{n_tickers}</b>
+                </div></div>""",
+                unsafe_allow_html=True,
+            )
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Per-radar watch list tabs
+        rtab_flow, rtab_cat, rtab_sm, rtab_sent = st.tabs([
+            "🌊 Flow", "⚡ Catalyst", "💰 Smart Money", "💬 Sentiment"
+        ])
+        for rtab, rname in zip([rtab_flow, rtab_cat, rtab_sm, rtab_sent], _RADAR_LABELS):
+            with rtab:
+                rows = per_radar[rname]
+                if rows:
+                    st.dataframe(
+                        pd.DataFrame(rows).drop_duplicates("Ticker").sort_values("Score radar", ascending=False),
+                        use_container_width=True, hide_index=True, height=280,
+                        column_config={
+                            "Score radar":  st.column_config.ProgressColumn("Score radar",  min_value=0, max_value=1, format="%.2f"),
+                            "Score total":  st.column_config.ProgressColumn("Score total",  min_value=0, max_value=1, format="%.2f"),
+                        },
+                    )
+                else:
+                    st.info("Aucun signal récent pour ce radar (DB vide ou marché fermé)")
+    except Exception as _e4:
+        import traceback as _tb4
+        st.error(f"Tab 4 error: {_e4}")
+        st.code(_tb4.format_exc())
 
 
 # ─────────────────────────────
@@ -1399,26 +1422,27 @@ with tab4:
 # ─────────────────────────────
 
 with tab5:
-    st.markdown("### 🌐 API Monitor — Live")
-    st.caption("Source : `data/logs/api_monitor.log`")
+    try:
+        st.markdown("### 🌐 API Monitor — Live")
+        st.caption("Source : `data/logs/api_monitor.log`")
 
-    # ── NLP Providers ─────────────────────────────────────────────────────────
-    st.markdown("#### 🤖 NLP Providers")
-    _gs = get_groq_status()
-    _ss = get_system_status()
+        # ── NLP Providers ─────────────────────────────────────────────────────────
+        st.markdown("#### 🤖 NLP Providers")
+        _gs = get_groq_status()
+        _ss = get_system_status()
 
-    nlp1, nlp2 = st.columns(2)
+        nlp1, nlp2 = st.columns(2)
 
-    # Groq card (principal)
-    with nlp1:
-        _g_state = _gs["state"]
-        _g_color = "#10b981" if _g_state == "ACTIVE" else ("#f59e0b" if _g_state in ("UNKNOWN","NO_DATA","DEGRADED") else "#ef4444")
-        _g_icon  = "🟢" if _g_state == "ACTIVE" else ("🟡" if _g_state in ("UNKNOWN","NO_DATA","DEGRADED") else "🔴")
-        _g_rate  = f"{_gs['success_rate']:.1f}%" if _gs["success_rate"] is not None else "—"
-        _g_calls = f"{_gs['calls_ok']}/{_gs['calls_total']}" if _gs["calls_total"] > 0 else "pas encore appelé"
-        _g_last  = _gs.get("last_ok") or "—"
-        _g_429   = f"{_gs['calls_429']} 429" if _gs["calls_429"] else "aucun"
-        st.markdown(f"""
+        # Groq card (principal)
+        with nlp1:
+            _g_state = _gs["state"]
+            _g_color = "#10b981" if _g_state == "ACTIVE" else ("#f59e0b" if _g_state in ("UNKNOWN","NO_DATA","DEGRADED") else "#ef4444")
+            _g_icon  = "🟢" if _g_state == "ACTIVE" else ("🟡" if _g_state in ("UNKNOWN","NO_DATA","DEGRADED") else "🔴")
+            _g_rate  = f"{_gs['success_rate']:.1f}%" if _gs["success_rate"] is not None else "—"
+            _g_calls = f"{_gs['calls_ok']}/{_gs['calls_total']}" if _gs["calls_total"] > 0 else "pas encore appelé"
+            _g_last  = _gs.get("last_ok") or "—"
+            _g_429   = f"{_gs['calls_429']} 429" if _gs["calls_429"] else "aucun"
+            st.markdown(f"""
 <div style="background:#0f1929;border:1px solid {_g_color}40;border-left:3px solid {_g_color};
             border-radius:8px;padding:1rem 1.2rem;margin-bottom:.5rem;">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem;">
@@ -1434,19 +1458,19 @@ with tab5:
   </div>
 </div>""", unsafe_allow_html=True)
 
-    # Grok card (fallback)
-    with nlp2:
-        _grok_ok  = _ss.get("grok", False)
-        _grok_lines = [l for l in load_api_monitor(500) if "| grok |" in l.lower()]
-        _grok_total = len(_grok_lines)
-        _grok_ok_n  = sum(1 for l in _grok_lines if "| OK(" in l)
-        _grok_429   = sum(1 for l in _grok_lines if "RATE_LIMIT" in l or "429" in l)
-        _grok_rate  = f"{_grok_ok_n/_grok_total*100:.1f}%" if _grok_total > 0 else "—"
-        _grok_state = "QUOTA_EXHAUSTED" if (_grok_total > 0 and _grok_429 > _grok_ok_n) else ("ACTIVE" if _grok_ok_n > 0 else ("CONFIGURED" if _grok_ok else "NOT_CONFIGURED"))
-        _gk_color   = "#10b981" if _grok_state == "ACTIVE" else ("#f59e0b" if _grok_state == "CONFIGURED" else "#ef4444")
-        _gk_icon    = "🟢" if _grok_state == "ACTIVE" else ("🟡" if _grok_state == "CONFIGURED" else "🔴")
-        _gk_last    = next((l.split("|")[0].strip() for l in reversed(_grok_lines) if "| OK(" in l), "—")
-        st.markdown(f"""
+        # Grok card (fallback)
+        with nlp2:
+            _grok_ok  = _ss.get("grok", False)
+            _grok_lines = [l for l in load_api_monitor(500) if "| grok |" in l.lower()]
+            _grok_total = len(_grok_lines)
+            _grok_ok_n  = sum(1 for l in _grok_lines if "| OK(" in l)
+            _grok_429   = sum(1 for l in _grok_lines if "RATE_LIMIT" in l or "429" in l)
+            _grok_rate  = f"{_grok_ok_n/_grok_total*100:.1f}%" if _grok_total > 0 else "—"
+            _grok_state = "QUOTA_EXHAUSTED" if (_grok_total > 0 and _grok_429 > _grok_ok_n) else ("ACTIVE" if _grok_ok_n > 0 else ("CONFIGURED" if _grok_ok else "NOT_CONFIGURED"))
+            _gk_color   = "#10b981" if _grok_state == "ACTIVE" else ("#f59e0b" if _grok_state == "CONFIGURED" else "#ef4444")
+            _gk_icon    = "🟢" if _grok_state == "ACTIVE" else ("🟡" if _grok_state == "CONFIGURED" else "🔴")
+            _gk_last    = next((l.split("|")[0].strip() for l in reversed(_grok_lines) if "| OK(" in l), "—")
+            st.markdown(f"""
 <div style="background:#0f1929;border:1px solid {_gk_color}40;border-left:3px solid {_gk_color};
             border-radius:8px;padding:1rem 1.2rem;margin-bottom:.5rem;">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem;">
@@ -1462,54 +1486,58 @@ with tab5:
   </div>
 </div>""", unsafe_allow_html=True)
 
-    st.markdown("---")
-    api_lines=load_api_monitor(200)
-    if not api_lines:
-        st.info("api_monitor.log vide — attend les premières requêtes")
-    else:
-        total_c=len(api_lines)
-        ok_c   =sum(1 for l in api_lines if "| OK(" in l)
-        warn_c =sum(1 for l in api_lines if "RATE_LIMIT" in l or "FORBIDDEN" in l)
-        err_c  =sum(1 for l in api_lines if "| ERROR |" in l or "ERR=" in l)
-        ok_pct =ok_c/total_c*100 if total_c else 0
+        st.markdown("---")
+        api_lines=load_api_monitor(200)
+        if not api_lines:
+            st.info("api_monitor.log vide — attend les premières requêtes")
+        else:
+            total_c=len(api_lines)
+            ok_c   =sum(1 for l in api_lines if "| OK(" in l)
+            warn_c =sum(1 for l in api_lines if "RATE_LIMIT" in l or "FORBIDDEN" in l)
+            err_c  =sum(1 for l in api_lines if "| ERROR |" in l or "ERR=" in l)
+            ok_pct =ok_c/total_c*100 if total_c else 0
 
-        a1,a2,a3,a4=st.columns(4)
-        a1.markdown(f'<div class="kpi"><div class="kpi-value">{total_c}</div><div class="kpi-label">Total Calls</div></div>',unsafe_allow_html=True)
-        a2.markdown(f'<div class="kpi"><div class="kpi-value green">{ok_c}</div><div class="kpi-label">Success</div><div class="kpi-delta green">{ok_pct:.1f}%</div></div>',unsafe_allow_html=True)
-        a3.markdown(f'<div class="kpi"><div class="kpi-value yellow">{warn_c}</div><div class="kpi-label">Rate Limits</div></div>',unsafe_allow_html=True)
-        a4.markdown(f'<div class="kpi"><div class="kpi-value red">{err_c}</div><div class="kpi-label">Errors</div></div>',unsafe_allow_html=True)
+            a1,a2,a3,a4=st.columns(4)
+            a1.markdown(f'<div class="kpi"><div class="kpi-value">{total_c}</div><div class="kpi-label">Total Calls</div></div>',unsafe_allow_html=True)
+            a2.markdown(f'<div class="kpi"><div class="kpi-value green">{ok_c}</div><div class="kpi-label">Success</div><div class="kpi-delta green">{ok_pct:.1f}%</div></div>',unsafe_allow_html=True)
+            a3.markdown(f'<div class="kpi"><div class="kpi-value yellow">{warn_c}</div><div class="kpi-label">Rate Limits</div></div>',unsafe_allow_html=True)
+            a4.markdown(f'<div class="kpi"><div class="kpi-value red">{err_c}</div><div class="kpi-label">Errors</div></div>',unsafe_allow_html=True)
 
-        st.markdown("<br>",unsafe_allow_html=True)
-        lat_fig=chart_api_latency(api_lines)
-        if lat_fig:
-            st.markdown("#### Avg Latency by Provider")
-            st.plotly_chart(lat_fig,use_container_width=True)
+            st.markdown("<br>",unsafe_allow_html=True)
+            lat_fig=chart_api_latency(api_lines)
+            if lat_fig:
+                st.markdown("#### Avg Latency by Provider")
+                st.plotly_chart(lat_fig,use_container_width=True)
 
-        st.markdown("#### Provider Breakdown")
-        providers={}
-        for line in api_lines:
-            try:
-                parts=[p.strip() for p in line.split("|")]
-                if len(parts)<8: continue
-                prov=parts[4]; tag=parts[6]
-                if prov not in providers: providers[prov]={"ok":0,"warn":0,"err":0,"total":0}
-                providers[prov]["total"]+=1
-                if tag.startswith("OK"): providers[prov]["ok"]+=1
-                elif "RATE_LIMIT" in tag or "FORBIDDEN" in tag: providers[prov]["warn"]+=1
-                elif "ERR" in tag or "TIMEOUT" in tag: providers[prov]["err"]+=1
-            except Exception: continue
-        if providers:
-            prov_df=pd.DataFrame([{"Provider":p,"Total":v["total"],"OK":v["ok"],"Warn":v["warn"],"Errors":v["err"],"Rate%":f"{v['ok']/v['total']*100:.1f}%" if v["total"] else "0%"} for p,v in sorted(providers.items(),key=lambda x:-x[1]["total"])])
-            st.dataframe(prov_df,use_container_width=True,hide_index=True)
+            st.markdown("#### Provider Breakdown")
+            providers={}
+            for line in api_lines:
+                try:
+                    parts=[p.strip() for p in line.split("|")]
+                    if len(parts)<8: continue
+                    prov=parts[4]; tag=parts[6]
+                    if prov not in providers: providers[prov]={"ok":0,"warn":0,"err":0,"total":0}
+                    providers[prov]["total"]+=1
+                    if tag.startswith("OK"): providers[prov]["ok"]+=1
+                    elif "RATE_LIMIT" in tag or "FORBIDDEN" in tag: providers[prov]["warn"]+=1
+                    elif "ERR" in tag or "TIMEOUT" in tag: providers[prov]["err"]+=1
+                except Exception: continue
+            if providers:
+                prov_df=pd.DataFrame([{"Provider":p,"Total":v["total"],"OK":v["ok"],"Warn":v["warn"],"Errors":v["err"],"Rate%":f"{v['ok']/v['total']*100:.1f}%" if v["total"] else "0%"} for p,v in sorted(providers.items(),key=lambda x:-x[1]["total"])])
+                st.dataframe(prov_df,use_container_width=True,hide_index=True)
 
-        st.markdown("#### Live Log")
-        api_html=[]
-        for line in api_lines[-80:]:
-            esc=line.strip().replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
-            if "| ERROR |" in line or "ERR=" in line: api_html.append(f'<div class="api-row api-err">{esc}</div>')
-            elif "RATE_LIMIT" in line or "FORBIDDEN" in line or "| WARNING |" in line: api_html.append(f'<div class="api-row api-warn">{esc}</div>')
-            else: api_html.append(f'<div class="api-row api-ok">{esc}</div>')
-        st.markdown(f'<div class="log-container">{"".join(api_html)}</div>',unsafe_allow_html=True)
+            st.markdown("#### Live Log")
+            api_html=[]
+            for line in api_lines[-80:]:
+                esc=line.strip().replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
+                if "| ERROR |" in line or "ERR=" in line: api_html.append(f'<div class="api-row api-err">{esc}</div>')
+                elif "RATE_LIMIT" in line or "FORBIDDEN" in line or "| WARNING |" in line: api_html.append(f'<div class="api-row api-warn">{esc}</div>')
+                else: api_html.append(f'<div class="api-row api-ok">{esc}</div>')
+            st.markdown(f'<div class="log-container">{"".join(api_html)}</div>',unsafe_allow_html=True)
+    except Exception as _e5:
+        import traceback as _tb5
+        st.error(f"Tab 5 error: {_e5}")
+        st.code(_tb5.format_exc())
 
 
 # ─────────────────────────────
@@ -1529,110 +1557,115 @@ def _log_color(line: str):
 
 
 with tab6:
-    st.markdown("### 📋 Live System Logs")
-    log_files=sorted(f.name for f in LOGS_DIR.glob("*.log")) if LOGS_DIR.exists() else []
-    PRIORITY_LOGS=["main.log","signal_producer.log","multi_radar.log",
-                   "execution_gate.log","ibkr_connector.log","api_monitor.log",
-                   "ollama.log","telegram_alerts.log"]
-    lc1,lc2=st.columns([1,3])
+    try:
+        st.markdown("### 📋 Live System Logs")
+        log_files=sorted(f.name for f in LOGS_DIR.glob("*.log")) if LOGS_DIR.exists() else []
+        PRIORITY_LOGS=["main.log","signal_producer.log","multi_radar.log",
+                       "execution_gate.log","ibkr_connector.log","api_monitor.log",
+                       "ollama.log","telegram_alerts.log"]
+        lc1,lc2=st.columns([1,3])
 
-    with lc1:
-        ordered=[l for l in PRIORITY_LOGS if l in log_files]+[l for l in log_files if l not in PRIORITY_LOGS]
-        selected_log=st.selectbox("📁 Log file",ordered,index=0) if log_files else None
-        n_lines=st.select_slider("Lines",[50,100,200,500],value=200)
-        level_filter=st.multiselect("Level",["INFO","WARNING","ERROR","DEBUG"],default=["INFO","WARNING","ERROR"])
-        keyword=st.text_input("🔍 Keyword",placeholder="TIMEOUT, BUY_STRONG…")
-        newest_first=st.toggle("Newest first",value=True,help="Most recent lines at top")
+        with lc1:
+            ordered=[l for l in PRIORITY_LOGS if l in log_files]+[l for l in log_files if l not in PRIORITY_LOGS]
+            selected_log=st.selectbox("📁 Log file",ordered,index=0) if log_files else None
+            n_lines=st.select_slider("Lines",[50,100,200,500],value=200)
+            level_filter=st.multiselect("Level",["INFO","WARNING","ERROR","DEBUG"],default=["INFO","WARNING","ERROR"])
+            keyword=st.text_input("🔍 Keyword",placeholder="TIMEOUT, BUY_STRONG…")
+            newest_first=st.toggle("Newest first",value=True,help="Most recent lines at top")
 
-        # Level counts
-        st.markdown("---")
-        if selected_log:
-            _all=load_log_tail(selected_log,500)
-            _ne=sum(1 for l in _all if "| ERROR |" in l)
-            _nw=sum(1 for l in _all if "| WARNING |" in l)
-            _ni=sum(1 for l in _all if "| INFO |" in l)
-            st.markdown(
-                f"<div style='font-size:.75rem;line-height:2.2'>"
-                f"<span style='color:#f87171'>● ERROR &nbsp;{_ne}</span><br>"
-                f"<span style='color:#fbbf24'>● WARN &nbsp;{_nw}</span><br>"
-                f"<span style='color:#94a3b8'>● INFO &nbsp;{_ni}</span>"
-                f"</div>",unsafe_allow_html=True)
-
-        # File list with sizes
-        st.markdown("<div style='font-size:.72rem;color:#64748b;margin-top:.5rem'>Files</div>",unsafe_allow_html=True)
-        for lf in ordered[:16]:
-            try:
-                sz=(LOGS_DIR/lf).stat().st_size
-                sz_str=f"{sz/1024:.0f}KB" if sz<1048576 else f"{sz/1048576:.1f}MB"
-                active=lf==selected_log
-                col="#60a5fa" if active else "#64748b"
-                pre="▶ " if active else "&nbsp;&nbsp;"
+            # Level counts
+            st.markdown("---")
+            if selected_log:
+                _all=load_log_tail(selected_log,500)
+                _ne=sum(1 for l in _all if "| ERROR |" in l)
+                _nw=sum(1 for l in _all if "| WARNING |" in l)
+                _ni=sum(1 for l in _all if "| INFO |" in l)
                 st.markdown(
-                    f"<div style='font-size:.68rem;color:{col};padding:.08rem 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>"
-                    f"{pre}{lf} <span style='color:#475569'>{sz_str}</span></div>",
-                    unsafe_allow_html=True)
-            except Exception: pass
+                    f"<div style='font-size:.75rem;line-height:2.2'>"
+                    f"<span style='color:#f87171'>● ERROR &nbsp;{_ne}</span><br>"
+                    f"<span style='color:#fbbf24'>● WARN &nbsp;{_nw}</span><br>"
+                    f"<span style='color:#94a3b8'>● INFO &nbsp;{_ni}</span>"
+                    f"</div>",unsafe_allow_html=True)
 
-    with lc2:
-        if selected_log:
-            lines=load_log_tail(selected_log,n_lines)
-            if level_filter: lines=[l for l in lines if any(lv in l for lv in level_filter)]
-            if keyword:      lines=[l for l in lines if keyword.lower() in l.lower()]
-            if newest_first: lines=list(reversed(lines))
-
-            # Last-modified indicator
-            try:
-                mtime=(LOGS_DIR/selected_log).stat().st_mtime
-                age=int(_time_mod.time()-mtime)
-                age_str=f"{age}s ago" if age<60 else f"{age//60}m {age%60}s ago"
-                dot_col="#34d399" if age<15 else "#fbbf24" if age<60 else "#f87171"
-            except Exception:
-                age_str="?"; dot_col="#94a3b8"
-
-            st.markdown(
-                f"<div style='display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem'>"
-                f"<code style='font-size:.8rem'>{selected_log}</code>"
-                f"<span style='background:#1e293b;border-radius:4px;padding:.1rem .4rem;"
-                f"font-size:.65rem;color:#64748b'>{len(lines)} lines</span>"
-                f"<span style='margin-left:auto;font-size:.65rem;color:{dot_col}'>⬤ updated {age_str}</span>"
-                f"</div>",unsafe_allow_html=True)
-
-            # Build HTML log lines — one <div> per line, color by level/event
-            row_divs=[]
-            for line in lines:
-                esc=line.rstrip("\n\r").replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
-                if not esc.strip(): continue
-                col,bg=_log_color(line)
-                row_divs.append(
-                    f'<div style="color:{col};background:{bg};padding:.04rem .3rem;'
-                    f'border-radius:2px;margin:.2px 0">{esc}</div>')
-
-            st.markdown(
-                f'<div class="log-container">{"".join(row_divs)}</div>',
-                unsafe_allow_html=True)
-        else:
-            st.info("No log files found in data/logs/")
-
-    # Cross-log ERROR panel
-    st.markdown("---")
-    st.markdown("#### ⚡ Recent ERRORs — all logs")
-    if log_files:
-        err_lines=[]
-        for lf in log_files:
-            for line in load_log_tail(lf,50):
-                if "| ERROR |" in line:
-                    err_lines.append(f"[{lf}] {line.strip()}")
-        if err_lines:
-            err_divs="".join(
-                f'<div style="color:#f87171;font-size:.68rem;line-height:1.55;'
-                f'padding:.15rem 0;border-bottom:1px solid #1a1a2e;'
-                f'white-space:pre-wrap;word-break:break-all">'
-                f'{l.replace("&","&amp;").replace("<","&lt;")}</div>'
-                for l in err_lines[-20:])
-            st.markdown(f'<div class="log-container" style="height:220px">{err_divs}</div>',
+            # File list with sizes
+            st.markdown("<div style='font-size:.72rem;color:#64748b;margin-top:.5rem'>Files</div>",unsafe_allow_html=True)
+            for lf in ordered[:16]:
+                try:
+                    sz=(LOGS_DIR/lf).stat().st_size
+                    sz_str=f"{sz/1024:.0f}KB" if sz<1048576 else f"{sz/1048576:.1f}MB"
+                    active=lf==selected_log
+                    col="#60a5fa" if active else "#64748b"
+                    pre="▶ " if active else "&nbsp;&nbsp;"
+                    st.markdown(
+                        f"<div style='font-size:.68rem;color:{col};padding:.08rem 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>"
+                        f"{pre}{lf} <span style='color:#475569'>{sz_str}</span></div>",
                         unsafe_allow_html=True)
-        else:
-            st.success("No recent errors ✅")
+                except Exception: pass
+
+        with lc2:
+            if selected_log:
+                lines=load_log_tail(selected_log,n_lines)
+                if level_filter: lines=[l for l in lines if any(lv in l for lv in level_filter)]
+                if keyword:      lines=[l for l in lines if keyword.lower() in l.lower()]
+                if newest_first: lines=list(reversed(lines))
+
+                # Last-modified indicator
+                try:
+                    mtime=(LOGS_DIR/selected_log).stat().st_mtime
+                    age=int(_time_mod.time()-mtime)
+                    age_str=f"{age}s ago" if age<60 else f"{age//60}m {age%60}s ago"
+                    dot_col="#34d399" if age<15 else "#fbbf24" if age<60 else "#f87171"
+                except Exception:
+                    age_str="?"; dot_col="#94a3b8"
+
+                st.markdown(
+                    f"<div style='display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem'>"
+                    f"<code style='font-size:.8rem'>{selected_log}</code>"
+                    f"<span style='background:#1e293b;border-radius:4px;padding:.1rem .4rem;"
+                    f"font-size:.65rem;color:#64748b'>{len(lines)} lines</span>"
+                    f"<span style='margin-left:auto;font-size:.65rem;color:{dot_col}'>⬤ updated {age_str}</span>"
+                    f"</div>",unsafe_allow_html=True)
+
+                # Build HTML log lines — one <div> per line, color by level/event
+                row_divs=[]
+                for line in lines:
+                    esc=line.rstrip("\n\r").replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
+                    if not esc.strip(): continue
+                    col,bg=_log_color(line)
+                    row_divs.append(
+                        f'<div style="color:{col};background:{bg};padding:.04rem .3rem;'
+                        f'border-radius:2px;margin:.2px 0">{esc}</div>')
+
+                st.markdown(
+                    f'<div class="log-container">{"".join(row_divs)}</div>',
+                    unsafe_allow_html=True)
+            else:
+                st.info("No log files found in data/logs/")
+
+        # Cross-log ERROR panel
+        st.markdown("---")
+        st.markdown("#### ⚡ Recent ERRORs — all logs")
+        if log_files:
+            err_lines=[]
+            for lf in log_files:
+                for line in load_log_tail(lf,50):
+                    if "| ERROR |" in line:
+                        err_lines.append(f"[{lf}] {line.strip()}")
+            if err_lines:
+                err_divs="".join(
+                    f'<div style="color:#f87171;font-size:.68rem;line-height:1.55;'
+                    f'padding:.15rem 0;border-bottom:1px solid #1a1a2e;'
+                    f'white-space:pre-wrap;word-break:break-all">'
+                    f'{l.replace("&","&amp;").replace("<","&lt;")}</div>'
+                    for l in err_lines[-20:])
+                st.markdown(f'<div class="log-container" style="height:220px">{err_divs}</div>',
+                            unsafe_allow_html=True)
+            else:
+                st.success("No recent errors ✅")
+    except Exception as _e6:
+        import traceback as _tb6
+        st.error(f"Tab 6 error: {_e6}")
+        st.code(_tb6.format_exc())
 
 
 # ─────────────────────────────
@@ -1640,39 +1673,44 @@ with tab6:
 # ─────────────────────────────
 
 with tab7:
-    st.markdown("### 🔍 Performance Audit")
-    if audit_data:
-        cg,cm=st.columns([1,2])
-        with cg:
-            st.markdown("#### Hit Rate")
-            st.plotly_chart(chart_hit_rate_gauge(audit_data.get("hit_rate",0)),use_container_width=True)
-        with cm:
-            st.markdown("#### Metrics")
-            metrics=[("Total Signals",audit_data.get("total_signals",0),"📡"),
-                     ("True Positives",audit_data.get("true_positives",0),"🟢"),
-                     ("False Positives",audit_data.get("false_positives",0),"🔴"),
-                     ("Missed Movers",audit_data.get("missed_movers",0),"⚠️"),
-                     ("Early Catch",f"{audit_data.get('early_catch_rate',0)*100:.1f}%","⏰"),
-                     ("Avg Lead",f"{audit_data.get('avg_lead_time_hours',0):.1f}h","📊")]
-            ca,cb,cc=st.columns(3)
-            for i,(lbl,val,ico) in enumerate(metrics):
-                [ca,cb,cc][i%3].markdown(f"""<div class="card" style="text-align:center;">
-                    <div style="color:#9ca3af;font-size:.7rem;">{ico} {lbl}</div>
-                    <div style="font-family:'JetBrains Mono',monospace;font-size:1.25rem;font-weight:700;color:#f9fafb;">{val}</div>
-                </div>""",unsafe_allow_html=True)
-        with st.expander("📋 Full Audit JSON"): st.json(audit_data)
-        if audit_data.get("missed_details"):
-            st.markdown("#### ❌ Missed Movers")
-            st.dataframe(pd.DataFrame(audit_data["missed_details"]),use_container_width=True,hide_index=True)
-    else:
-        st.info("No audit report yet.")
-        if st.button("🚀 Run Daily Audit Now"):
-            with st.spinner("Running…"):
-                try:
-                    from daily_audit import run_daily_audit
-                    run_daily_audit(send_telegram=False)
-                    st.cache_data.clear(); st.success("Done!"); st.rerun()
-                except Exception as e: st.error(f"Audit failed: {e}")
+    try:
+        st.markdown("### 🔍 Performance Audit")
+        if audit_data:
+            cg,cm=st.columns([1,2])
+            with cg:
+                st.markdown("#### Hit Rate")
+                st.plotly_chart(chart_hit_rate_gauge(audit_data.get("hit_rate",0)),use_container_width=True)
+            with cm:
+                st.markdown("#### Metrics")
+                metrics=[("Total Signals",audit_data.get("total_signals",0),"📡"),
+                         ("True Positives",audit_data.get("true_positives",0),"🟢"),
+                         ("False Positives",audit_data.get("false_positives",0),"🔴"),
+                         ("Missed Movers",audit_data.get("missed_movers",0),"⚠️"),
+                         ("Early Catch",f"{audit_data.get('early_catch_rate',0)*100:.1f}%","⏰"),
+                         ("Avg Lead",f"{audit_data.get('avg_lead_time_hours',0):.1f}h","📊")]
+                ca,cb,cc=st.columns(3)
+                for i,(lbl,val,ico) in enumerate(metrics):
+                    [ca,cb,cc][i%3].markdown(f"""<div class="card" style="text-align:center;">
+                        <div style="color:#9ca3af;font-size:.7rem;">{ico} {lbl}</div>
+                        <div style="font-family:'JetBrains Mono',monospace;font-size:1.25rem;font-weight:700;color:#f9fafb;">{val}</div>
+                    </div>""",unsafe_allow_html=True)
+            with st.expander("📋 Full Audit JSON"): st.json(audit_data)
+            if audit_data.get("missed_details"):
+                st.markdown("#### ❌ Missed Movers")
+                st.dataframe(pd.DataFrame(audit_data["missed_details"]),use_container_width=True,hide_index=True)
+        else:
+            st.info("No audit report yet.")
+            if st.button("🚀 Run Daily Audit Now"):
+                with st.spinner("Running…"):
+                    try:
+                        from daily_audit import run_daily_audit
+                        run_daily_audit(send_telegram=False)
+                        st.cache_data.clear(); st.success("Done!"); st.rerun()
+                    except Exception as e: st.error(f"Audit failed: {e}")
+    except Exception as _e7:
+        import traceback as _tb7
+        st.error(f"Tab 7 error: {_e7}")
+        st.code(_tb7.format_exc())
 
 
 # ─────────────────────────────
