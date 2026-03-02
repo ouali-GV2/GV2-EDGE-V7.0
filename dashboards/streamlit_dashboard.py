@@ -1769,202 +1769,168 @@ with tab8:
 # ─────────────────────────────
 
 with tab9:
-    st.markdown("### 🗂️ Ticker Profile Store — Strategic DB")
+    try:
+        st.markdown("### 🗂️ Ticker Profile Store — Strategic DB")
 
-    # Refresh button + error surface
-    _pr1, _pr2 = st.columns([1, 5])
-    with _pr1:
         if st.button("🔄 Refresh", key="prof_refresh"):
-            st.cache_data.clear(); st.rerun()
+            st.cache_data.clear()
+            st.rerun()
 
-    prof_df, _prof_err = load_ticker_profiles()
+        # Load directly from DB (no cache layer to bypass any stale state)
+        _db9 = DATA_DIR / "ticker_profiles.db"
+        if not _db9.exists():
+            st.warning(f"DB not found: `{_db9}`")
+        else:
+            _conn9 = sqlite3.connect(str(_db9), check_same_thread=False)
+            prof_df = pd.read_sql_query(
+                "SELECT * FROM ticker_profiles ORDER BY data_quality DESC", _conn9)
+            _conn9.close()
 
-    if _prof_err:
-        st.error(f"Load error: {_prof_err}")
+            st.caption(f"**{len(prof_df)}** profiles in DB · `{_db9}`")
 
-    if prof_df.empty:
-        db_path = DATA_DIR / "ticker_profiles.db"
-        st.info(
-            f"**No profiles in DB yet.**  \n"
-            f"DB path: `{db_path}` — exists: `{db_path.exists()}`  \n"
-            f"Run `asyncio.run(update_ticker_profile('AAPL'))` or the weekend batch to populate."
-        )
-    elif not prof_df.empty:
-      try:
-        # ── KPI row ──
-        today_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        updated_today = int((prof_df["updated_at"].str[:10] == today_iso).sum()) if "updated_at" in prof_df.columns else 0
-        avg_q = prof_df["data_quality"].mean() if "data_quality" in prof_df.columns else 0
-        squeeze_setups = int((prof_df["short_interest_pct"].fillna(0) > 20).sum()) if "short_interest_pct" in prof_df.columns else 0
-        htb_count = int((prof_df["borrow_rate"].fillna(0) > 100).sum()) if "borrow_rate" in prof_df.columns else 0
-
-        pk1, pk2, pk3, pk4, pk5 = st.columns(5)
-        pk1.metric("Total Profiles", f"{len(prof_df):,}")
-        pk2.metric("Avg Data Quality", f"{avg_q:.0%}")
-        pk3.metric("Squeeze Setups (SI>20%)", f"{squeeze_setups:,}")
-        pk4.metric("HTB (borrow>100%)", f"{htb_count:,}")
-        pk5.metric("Updated Today", f"{updated_today:,}")
-
-        st.markdown("---")
-
-        # ── Filters ──
-        pf1, pf2, pf3, pf4, pf5 = st.columns([2, 1.5, 1.5, 1.5, 1.5])
-        with pf1:
-            p_search = st.text_input("🔍 Ticker", placeholder="AAPL, TSLA…", key="p_search")
-        with pf2:
-            p_max_float = st.number_input("Float max (M shares)", min_value=0.0, value=0.0, step=1.0, key="p_float",
-                                          help="0 = no limit")
-        with pf3:
-            p_min_si = st.number_input("SI min (%)", min_value=0.0, value=0.0, step=1.0, key="p_si")
-        with pf4:
-            p_min_quality = st.slider("Quality min", 0.0, 1.0, 0.0, 0.1, key="p_qual")
-        with pf5:
-            p_risk_flags = st.multiselect("Risk flags", ["ATM Active", "Shelf Active", "Warrants", "Death Spiral (3+RS)"],
-                                          key="p_flags")
-
-        # ── Apply filters ──
-        fdf = prof_df.copy()
-        if p_search:
-            fdf = fdf[fdf["ticker"].str.upper().str.contains(p_search.upper(), na=False)]
-        if p_max_float > 0 and "float_shares" in fdf.columns:
-            fdf = fdf[fdf["float_shares"].fillna(float("inf")) <= p_max_float * 1_000_000]
-        if p_min_si > 0 and "short_interest_pct" in fdf.columns:
-            fdf = fdf[fdf["short_interest_pct"].fillna(0) >= p_min_si]
-        if p_min_quality > 0:
-            fdf = fdf[fdf["data_quality"].fillna(0) >= p_min_quality]
-        if "ATM Active" in p_risk_flags and "atm_active" in fdf.columns:
-            fdf = fdf[fdf["atm_active"] == 1]
-        if "Shelf Active" in p_risk_flags and "shelf_active" in fdf.columns:
-            fdf = fdf[fdf["shelf_active"] == 1]
-        if "Warrants" in p_risk_flags and "warrants_outstanding" in fdf.columns:
-            fdf = fdf[fdf["warrants_outstanding"] == 1]
-        if "Death Spiral (3+RS)" in p_risk_flags and "reverse_split_count" in fdf.columns:
-            fdf = fdf[fdf["reverse_split_count"].fillna(0) >= 3]
-
-        st.caption(f"Showing **{len(fdf):,}** of **{len(prof_df):,}** profiles")
-
-        # ── Display columns — format for readability ──
-        DISPLAY_COLS = {
-            "ticker":             "Ticker",
-            "market_cap":         "Mkt Cap",
-            "float_shares":       "Float (M)",
-            "short_interest_pct": "SI %",
-            "days_to_cover":      "DTC",
-            "borrow_rate":        "Borrow %",
-            "insider_pct":        "Insider %",
-            "institutional_pct":  "Inst %",
-            "reverse_split_count":"RS Count",
-            "shelf_active":       "Shelf",
-            "atm_active":         "ATM",
-            "dilution_tier":      "Dilution Tier",
-            "top_gainer_count":   "Top Gains",
-            "avg_move_pct":       "Avg Move %",
-            "data_quality":       "Quality",
-            "updated_at":         "Updated",
-        }
-        avail = [c for c in DISPLAY_COLS if c in fdf.columns]
-        disp = fdf[avail].copy()
-
-        # Format numbers
-        if "market_cap" in disp.columns:
-            disp["market_cap"] = disp["market_cap"].apply(
-                lambda x: f"${x/1e9:.1f}B" if pd.notna(x) and x >= 1e9
-                else (f"${x/1e6:.0f}M" if pd.notna(x) and x > 0 else "—"))
-        if "float_shares" in disp.columns:
-            disp["float_shares"] = disp["float_shares"].apply(
-                lambda x: f"{x/1e6:.1f}" if pd.notna(x) and x > 0 else "—")
-        for pct_col in ("short_interest_pct", "borrow_rate", "insider_pct", "institutional_pct"):
-            if pct_col in disp.columns:
-                disp[pct_col] = disp[pct_col].apply(
-                    lambda x: f"{x:.1f}%" if pd.notna(x) and x > 0 else "—")
-        for flag_col in ("shelf_active", "atm_active"):
-            if flag_col in disp.columns:
-                disp[flag_col] = disp[flag_col].apply(lambda x: "⚠️" if x == 1 else "")
-        if "data_quality" in disp.columns:
-            disp["data_quality"] = disp["data_quality"].apply(
-                lambda x: f"{x:.0%}" if pd.notna(x) else "—")
-        if "updated_at" in disp.columns:
-            disp["updated_at"] = disp["updated_at"].str[:16].str.replace("T", " ")
-        if "days_to_cover" in disp.columns:
-            disp["days_to_cover"] = disp["days_to_cover"].apply(
-                lambda x: f"{x:.1f}d" if pd.notna(x) and x > 0 else "—")
-
-        disp = disp.rename(columns=DISPLAY_COLS)
-
-        st.dataframe(
-            disp,
-            use_container_width=True,
-            hide_index=True,
-            height=min(650, 50 + len(disp) * 35),
-        )
-
-        # ── Download ──
-        dl1, dl2 = st.columns([1, 5])
-        with dl1:
-            csv_bytes = fdf.to_csv(index=False).encode()
-            st.download_button("⬇️ CSV", data=csv_bytes,
-                               file_name=f"ticker_profiles_{today_iso}.csv", mime="text/csv")
-
-        # ── Selected ticker detail panel ──
-        st.markdown("---")
-        st.markdown("#### 🔎 Ticker Detail")
-        detail_ticker = st.text_input("Enter ticker to inspect", placeholder="e.g. AAPL", key="p_detail").upper().strip()
-        if detail_ticker:
-            row = prof_df[prof_df["ticker"] == detail_ticker]
-            if row.empty:
-                st.warning(f"No profile found for **{detail_ticker}**. Run `update_ticker_profile('{detail_ticker}')` first.")
+            if prof_df.empty:
+                st.info("No profiles yet. Run `asyncio.run(update_ticker_profile('AAPL'))` or the weekend batch.")
             else:
-                r = row.iloc[0]
-                d1, d2, d3, d4 = st.columns(4)
-                def _v(val, fmt=None):
-                    if pd.isna(val) or val is None: return "—"
-                    return fmt.format(val) if fmt else str(val)
+                # ── KPI row ──
+                avg_q = prof_df["data_quality"].mean() if "data_quality" in prof_df.columns else 0
+                squeeze_setups = int((prof_df["short_interest_pct"].fillna(0) > 20).sum()) if "short_interest_pct" in prof_df.columns else 0
+                htb_count = int((prof_df["borrow_rate"].fillna(0) > 100).sum()) if "borrow_rate" in prof_df.columns else 0
+                today_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                updated_today = int((prof_df["updated_at"].str[:10] == today_iso).sum()) if "updated_at" in prof_df.columns else 0
 
-                with d1:
-                    st.markdown("**Capital Structure**")
-                    st.metric("Market Cap",  _v(r.get("market_cap"),  "${:,.0f}"))
-                    st.metric("Float",       f"{r['float_shares']/1e6:.1f}M" if pd.notna(r.get('float_shares')) and r.get('float_shares',0)>0 else "—")
-                    st.metric("Shares Out",  f"{r['shares_outstanding']/1e6:.1f}M" if pd.notna(r.get('shares_outstanding')) and r.get('shares_outstanding',0)>0 else "—")
-                    st.metric("Insider %",   _v(r.get("insider_pct"), "{:.1f}%"))
-                    st.metric("Inst %",      _v(r.get("institutional_pct"), "{:.1f}%"))
-                with d2:
-                    st.markdown("**Short Squeeze**")
-                    st.metric("Short Interest",  _v(r.get("short_interest_pct"), "{:.1f}%"))
-                    st.metric("Days to Cover",   _v(r.get("days_to_cover"), "{:.1f}d"))
-                    borrow = r.get("borrow_rate") or 0
-                    st.metric("Borrow Rate", f"{borrow:.1f}%" if borrow > 0 else "—",
-                              delta="HTB ⚠️" if borrow > 100 else None)
-                with d3:
-                    st.markdown("**Risk Flags**")
-                    rs = int(r.get("reverse_split_count") or 0)
-                    st.metric("Reverse Splits", f"{rs}x", delta="☠️ Death Spiral" if rs >= 3 else None)
-                    st.metric("Last RS",         _v(r.get("last_reverse_split")))
-                    st.metric("Shelf Active",    "⚠️ YES" if r.get("shelf_active") == 1 else "No")
-                    st.metric("ATM Active",      "⚠️ YES" if r.get("atm_active") == 1 else "No")
-                    st.metric("Dilution Tier",   _v(r.get("dilution_tier")))
-                with d4:
-                    st.markdown("**History & Technical**")
-                    st.metric("Top Gainer Count",  _v(r.get("top_gainer_count")))
-                    st.metric("Avg Move",           _v(r.get("avg_move_pct"), "{:.1f}%"))
-                    st.metric("Best Session",       _v(r.get("best_session")))
-                    st.metric("Catalyst Affinity",  _v(r.get("catalyst_affinity")))
-                    st.metric("ATR-14",             _v(r.get("atr_14"), "${:.3f}"))
-                    st.metric("Avg Daily Vol",      f"{r['avg_daily_volume']:,.0f}" if pd.notna(r.get('avg_daily_volume')) and r.get('avg_daily_volume',0)>0 else "—")
+                pk1, pk2, pk3, pk4, pk5 = st.columns(5)
+                pk1.metric("Total Profiles", f"{len(prof_df):,}")
+                pk2.metric("Avg Data Quality", f"{avg_q:.0%}")
+                pk3.metric("Squeeze Setups (SI>20%)", f"{squeeze_setups:,}")
+                pk4.metric("HTB (borrow>100%)", f"{htb_count:,}")
+                pk5.metric("Updated Today", f"{updated_today:,}")
 
-                # Quality bar
-                q = float(r.get("data_quality") or 0)
-                q_color = "#10b981" if q >= 0.7 else "#f59e0b" if q >= 0.4 else "#ef4444"
-                st.markdown(
-                    f'<div style="margin:.5rem 0 .2rem;font-size:.8rem;color:#9ca3af;">Data Quality</div>'
-                    f'<div style="background:#1a1f2e;border-radius:6px;height:12px;overflow:hidden;">'
-                    f'<div style="background:{q_color};width:{q*100:.0f}%;height:100%;border-radius:6px;"></div></div>'
-                    f'<div style="font-size:.75rem;color:{q_color};margin-top:.2rem;">{q:.0%} — updated {_v(r.get("updated_at",""))[:16]}</div>',
-                    unsafe_allow_html=True)
+                st.markdown("---")
 
-      except Exception as _tab9_err:
-          import traceback as _tb
-          st.error(f"Profiles render error: {_tab9_err}")
-          st.code(_tb.format_exc())
+                # ── Filters ──
+                pf1, pf2, pf3, pf4, pf5 = st.columns([2, 1.5, 1.5, 1.5, 1.5])
+                with pf1:
+                    p_search = st.text_input("🔍 Ticker", placeholder="AAPL, TSLA…", key="p_search")
+                with pf2:
+                    p_max_float = st.number_input("Float max (M shares)", min_value=0.0, value=0.0, step=1.0, key="p_float", help="0 = no limit")
+                with pf3:
+                    p_min_si = st.number_input("SI min (%)", min_value=0.0, value=0.0, step=1.0, key="p_si")
+                with pf4:
+                    p_min_quality = st.slider("Quality min", 0.0, 1.0, 0.0, 0.1, key="p_qual")
+                with pf5:
+                    p_risk_flags = st.multiselect("Risk flags", ["ATM Active", "Shelf Active", "Warrants", "Death Spiral (3+RS)"], key="p_flags")
+
+                # ── Apply filters ──
+                fdf = prof_df.copy()
+                if p_search:
+                    fdf = fdf[fdf["ticker"].str.upper().str.contains(p_search.upper(), na=False)]
+                if p_max_float > 0 and "float_shares" in fdf.columns:
+                    fdf = fdf[fdf["float_shares"].fillna(float("inf")) <= p_max_float * 1_000_000]
+                if p_min_si > 0 and "short_interest_pct" in fdf.columns:
+                    fdf = fdf[fdf["short_interest_pct"].fillna(0) >= p_min_si]
+                if p_min_quality > 0:
+                    fdf = fdf[fdf["data_quality"].fillna(0) >= p_min_quality]
+                if "ATM Active" in p_risk_flags and "atm_active" in fdf.columns:
+                    fdf = fdf[fdf["atm_active"] == 1]
+                if "Shelf Active" in p_risk_flags and "shelf_active" in fdf.columns:
+                    fdf = fdf[fdf["shelf_active"] == 1]
+                if "Warrants" in p_risk_flags and "warrants_outstanding" in fdf.columns:
+                    fdf = fdf[fdf["warrants_outstanding"] == 1]
+                if "Death Spiral (3+RS)" in p_risk_flags and "reverse_split_count" in fdf.columns:
+                    fdf = fdf[fdf["reverse_split_count"].fillna(0) >= 3]
+
+                st.caption(f"Showing **{len(fdf):,}** of **{len(prof_df):,}** profiles")
+
+                # ── Format display ──
+                DISPLAY_COLS = {
+                    "ticker": "Ticker", "market_cap": "Mkt Cap", "float_shares": "Float (M)",
+                    "short_interest_pct": "SI %", "days_to_cover": "DTC", "borrow_rate": "Borrow %",
+                    "insider_pct": "Insider %", "institutional_pct": "Inst %",
+                    "reverse_split_count": "RS Count", "shelf_active": "Shelf", "atm_active": "ATM",
+                    "dilution_tier": "Dilution Tier", "top_gainer_count": "Top Gains",
+                    "avg_move_pct": "Avg Move %", "data_quality": "Quality", "updated_at": "Updated",
+                }
+                avail = [c for c in DISPLAY_COLS if c in fdf.columns]
+                disp = fdf[avail].copy()
+                if "market_cap" in disp.columns:
+                    disp["market_cap"] = disp["market_cap"].apply(
+                        lambda x: f"${x/1e9:.1f}B" if pd.notna(x) and x >= 1e9 else (f"${x/1e6:.0f}M" if pd.notna(x) and x > 0 else "—"))
+                if "float_shares" in disp.columns:
+                    disp["float_shares"] = disp["float_shares"].apply(
+                        lambda x: f"{x/1e6:.1f}" if pd.notna(x) and x > 0 else "—")
+                for _pc in ("short_interest_pct", "borrow_rate", "insider_pct", "institutional_pct"):
+                    if _pc in disp.columns:
+                        disp[_pc] = disp[_pc].apply(lambda x: f"{x:.1f}%" if pd.notna(x) and x > 0 else "—")
+                for _fc in ("shelf_active", "atm_active"):
+                    if _fc in disp.columns:
+                        disp[_fc] = disp[_fc].apply(lambda x: "⚠️" if x == 1 else "")
+                if "data_quality" in disp.columns:
+                    disp["data_quality"] = disp["data_quality"].apply(lambda x: f"{x:.0%}" if pd.notna(x) else "—")
+                if "updated_at" in disp.columns:
+                    disp["updated_at"] = disp["updated_at"].str[:16].str.replace("T", " ")
+                if "days_to_cover" in disp.columns:
+                    disp["days_to_cover"] = disp["days_to_cover"].apply(lambda x: f"{x:.1f}d" if pd.notna(x) and x > 0 else "—")
+                disp = disp.rename(columns=DISPLAY_COLS)
+
+                st.dataframe(disp, use_container_width=True, hide_index=True,
+                             height=min(650, 80 + len(disp) * 35))
+
+                # ── Download ──
+                st.download_button("⬇️ Export CSV", data=fdf.to_csv(index=False).encode(),
+                                   file_name=f"ticker_profiles_{today_iso}.csv", mime="text/csv")
+
+                # ── Ticker detail ──
+                st.markdown("---")
+                st.markdown("#### 🔎 Ticker Detail")
+                detail_ticker = st.text_input("Ticker to inspect", placeholder="e.g. AAPL", key="p_detail").upper().strip()
+                if detail_ticker:
+                    row = prof_df[prof_df["ticker"] == detail_ticker]
+                    if row.empty:
+                        st.warning(f"No profile for **{detail_ticker}**.")
+                    else:
+                        r = row.iloc[0]
+                        def _fv(val, fmt=None):
+                            if pd.isna(val) or val is None: return "—"
+                            return fmt.format(val) if fmt else str(val)
+                        d1, d2, d3, d4 = st.columns(4)
+                        with d1:
+                            st.markdown("**Capital Structure**")
+                            st.metric("Market Cap", _fv(r.get("market_cap"), "${:,.0f}"))
+                            st.metric("Float", f"{r['float_shares']/1e6:.1f}M" if pd.notna(r.get("float_shares")) and r.get("float_shares", 0) > 0 else "—")
+                            st.metric("Insider %", _fv(r.get("insider_pct"), "{:.1f}%"))
+                            st.metric("Inst %", _fv(r.get("institutional_pct"), "{:.1f}%"))
+                        with d2:
+                            st.markdown("**Short Squeeze**")
+                            st.metric("Short Interest", _fv(r.get("short_interest_pct"), "{:.1f}%"))
+                            st.metric("Days to Cover", _fv(r.get("days_to_cover"), "{:.1f}d"))
+                            borrow = r.get("borrow_rate") or 0
+                            st.metric("Borrow Rate", f"{borrow:.1f}%" if borrow > 0 else "—", delta="HTB ⚠️" if borrow > 100 else None)
+                        with d3:
+                            st.markdown("**Risk Flags**")
+                            rs = int(r.get("reverse_split_count") or 0)
+                            st.metric("Reverse Splits", f"{rs}x", delta="☠️ Death Spiral" if rs >= 3 else None)
+                            st.metric("Shelf Active", "⚠️ YES" if r.get("shelf_active") == 1 else "No")
+                            st.metric("ATM Active", "⚠️ YES" if r.get("atm_active") == 1 else "No")
+                            st.metric("Dilution Tier", _fv(r.get("dilution_tier")))
+                        with d4:
+                            st.markdown("**History & Technical**")
+                            st.metric("Top Gainer Count", _fv(r.get("top_gainer_count")))
+                            st.metric("Avg Move", _fv(r.get("avg_move_pct"), "{:.1f}%"))
+                            st.metric("Best Session", _fv(r.get("best_session")))
+                            st.metric("ATR-14", _fv(r.get("atr_14"), "${:.3f}"))
+                        q = float(r.get("data_quality") or 0)
+                        qc = "#10b981" if q >= 0.7 else "#f59e0b" if q >= 0.4 else "#ef4444"
+                        st.markdown(
+                            f'<div style="margin:.5rem 0 .2rem;font-size:.8rem;color:#9ca3af">Data Quality</div>'
+                            f'<div style="background:#1a1f2e;border-radius:6px;height:12px;overflow:hidden">'
+                            f'<div style="background:{qc};width:{q*100:.0f}%;height:100%;border-radius:6px"></div></div>'
+                            f'<div style="font-size:.75rem;color:{qc};margin-top:.2rem">{q:.0%} — {_fv(r.get("updated_at",""))[:16]}</div>',
+                            unsafe_allow_html=True)
+
+    except Exception as _e9:
+        import traceback as _tb9
+        st.error(f"Profiles tab error: {_e9}")
+        st.code(_tb9.format_exc())
 
 
 # ============================
