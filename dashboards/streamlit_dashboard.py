@@ -307,19 +307,19 @@ def load_universe_size() -> int:
     return 0
 
 
-@st.cache_data(ttl=300)
-def load_ticker_profiles() -> pd.DataFrame:
-    """Load all ticker profiles from SQLite."""
+@st.cache_data(ttl=120)
+def load_ticker_profiles() -> tuple[pd.DataFrame, str]:
+    """Load all ticker profiles from SQLite. Returns (df, error_msg)."""
     db = DATA_DIR / "ticker_profiles.db"
     if not db.exists():
-        return pd.DataFrame()
+        return pd.DataFrame(), f"DB not found: {db}"
     try:
         conn = sqlite3.connect(str(db), check_same_thread=False)
         df = pd.read_sql_query("SELECT * FROM ticker_profiles ORDER BY data_quality DESC", conn)
         conn.close()
-        return df
-    except Exception:
-        return pd.DataFrame()
+        return df, ""
+    except Exception as e:
+        return pd.DataFrame(), str(e)
 
 
 @st.cache_data(ttl=300)
@@ -1771,11 +1771,26 @@ with tab8:
 with tab9:
     st.markdown("### 🗂️ Ticker Profile Store — Strategic DB")
 
-    prof_df = load_ticker_profiles()
+    # Refresh button + error surface
+    _pr1, _pr2 = st.columns([1, 5])
+    with _pr1:
+        if st.button("🔄 Refresh", key="prof_refresh"):
+            st.cache_data.clear(); st.rerun()
+
+    prof_df, _prof_err = load_ticker_profiles()
+
+    if _prof_err:
+        st.error(f"Load error: {_prof_err}")
 
     if prof_df.empty:
-        st.info("No profiles yet. Run the weekend batch (`ScanType.TICKER_PROFILES`) or `asyncio.run(update_ticker_profile('AAPL'))` to populate.")
-    else:
+        db_path = DATA_DIR / "ticker_profiles.db"
+        st.info(
+            f"**No profiles in DB yet.**  \n"
+            f"DB path: `{db_path}` — exists: `{db_path.exists()}`  \n"
+            f"Run `asyncio.run(update_ticker_profile('AAPL'))` or the weekend batch to populate."
+        )
+    elif not prof_df.empty:
+      try:
         # ── KPI row ──
         today_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         updated_today = int((prof_df["updated_at"].str[:10] == today_iso).sum()) if "updated_at" in prof_df.columns else 0
@@ -1945,6 +1960,11 @@ with tab9:
                     f'<div style="background:{q_color};width:{q*100:.0f}%;height:100%;border-radius:6px;"></div></div>'
                     f'<div style="font-size:.75rem;color:{q_color};margin-top:.2rem;">{q:.0%} — updated {_v(r.get("updated_at",""))[:16]}</div>',
                     unsafe_allow_html=True)
+
+      except Exception as _tab9_err:
+          import traceback as _tb
+          st.error(f"Profiles render error: {_tab9_err}")
+          st.code(_tb.format_exc())
 
 
 # ============================
